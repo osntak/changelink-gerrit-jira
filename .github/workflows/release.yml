@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.1.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,18 +21,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+      - name: Resolve release tag
+        id: release
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW_TAG="${{ inputs.tag }}"
+          else
+            RAW_TAG="${GITHUB_REF_NAME}"
+          fi
+
+          TAG="${RAW_TAG#refs/tags/}"
+          VERSION="${TAG#v}"
+
+          if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid tag: $TAG"
+            echo "Expected format: vX.Y.Z"
+            exit 1
+          fi
+
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Update manifest version
         run: |
-          jq --arg v "${{ steps.version.outputs.VERSION }}" '.version = $v' manifest.json > manifest.tmp.json
+          jq --arg v "${{ steps.release.outputs.VERSION }}" '.version = $v' manifest.json > manifest.tmp.json
           mv manifest.tmp.json manifest.json
 
       - name: Build extension zip
         run: |
-          ZIP_NAME="gerrit-jira-automation-${{ github.ref_name }}.zip"
+          ZIP_NAME="gerrit-jira-automation-${{ steps.release.outputs.TAG }}.zip"
           zip -r "$ZIP_NAME" \
             manifest.json \
             message_types.js \
@@ -41,13 +64,14 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Gerrit → Jira Comment ${{ github.ref_name }}"
+          tag_name: ${{ steps.release.outputs.TAG }}
+          name: "Gerrit Jira Tools ${{ steps.release.outputs.TAG }}"
           generate_release_notes: true
           files: ${{ env.ZIP_NAME }}
           body: |
             ## 설치 방법
 
-            1. 아래 **Assets** 에서 `gerrit-jira-automation-${{ github.ref_name }}.zip` 다운로드
+            1. 아래 **Assets** 에서 `gerrit-jira-automation-${{ steps.release.outputs.TAG }}.zip` 다운로드
             2. Chrome 주소창에 `chrome://extensions` 입력
             3. 우측 상단 **개발자 모드** 켜기
             4. zip 파일 압축 해제 후 **압축 해제된 확장 프로그램 로드** 클릭
