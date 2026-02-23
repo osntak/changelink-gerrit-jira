@@ -258,7 +258,8 @@
     <textarea
       id="template"
       spellcheck="false"
-      placeholder="{title}
+      placeholder="[auto:gerrit]
+{title}
 
 {body}
 
@@ -282,8 +283,8 @@ Gerrit: {url}"
         에서 발급하세요.
       </li>
       <li>
-        Gerrit change 페이지로 이동 후 툴바 아이콘을 클릭하면
-        Jira 이슈에 댓글이 자동 추가됩니다.
+        Gerrit change 페이지에서 툴바 아이콘을 클릭하면 popup이 열리며
+        이슈 조회/웹링크 추가/코멘트 생성을 실행할 수 있습니다.
       </li>
       <li>
         이슈 키는 change 제목(예: <code>[PROJ-123] Fix bug</code>) 또는
@@ -295,6 +296,7 @@ Gerrit: {url}"
     </ul>
   </div>
 
+  <script src="message_types.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

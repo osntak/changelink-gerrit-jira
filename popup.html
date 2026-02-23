@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UPROJ-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gerrit Jira Tools</title>
+  <style>
+    :root {
+      --bg: #f7f9fc;
+      --card: #ffffff;
+      --line: #dde3ee;
+      --ink: #1e2530;
+      --sub: #526074;
+      --pri: #1565c0;
+      --ok: #2e7d32;
+      --err: #c62828;
+      --warn: #e65100;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      width: 360px;
+      background: var(--bg);
+      color: var(--ink);
+      font: 13px/1.45 'Segoe UI', system-ui, sans-serif;
+    }
+
+    .wrap {
+      padding: 14px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 14px;
+      color: var(--pri);
+    }
+
+    .kv {
+      margin-top: 8px;
+      display: grid;
+      gap: 4px;
+      color: var(--sub);
+      font-size: 12px;
+    }
+
+    .value {
+      color: var(--ink);
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .btn-row {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button.primary {
+      background: var(--pri);
+      color: #fff;
+      border-color: var(--pri);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .issue-card {
+      display: none;
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fbfdff;
+      font-size: 12px;
+    }
+
+    .issue-card .title {
+      font-weight: 700;
+      margin-bottom: 6px;
+      word-break: break-word;
+    }
+
+    .status {
+      min-height: 20px;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      background: #ecf2fb;
+      color: var(--pri);
+    }
+
+    .status.ok { background: #e8f5e9; color: var(--ok); }
+    .status.err { background: #ffebee; color: var(--err); }
+    .status.warn { background: #fff3e0; color: var(--warn); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="panel">
+      <h1>Gerrit Jira Tools</h1>
+      <div class="kv">
+        <div>Detected issue key</div>
+        <div id="issue-key" class="value">-</div>
+        <div>Subject</div>
+        <div id="subject" class="value">-</div>
+      </div>
+
+      <div class="btn-row">
+        <button id="btn-refresh" class="primary">이슈 조회 / 새로고침</button>
+        <button id="btn-link">웹링크 추가</button>
+        <button id="btn-comment">코멘트 생성</button>
+      </div>
+
+      <div id="issue-card" class="issue-card">
+        <div id="issue-summary" class="title"></div>
+        <div id="issue-status"></div>
+        <div id="issue-assignee"></div>
+      </div>
+    </section>
+
+    <div id="status" class="status">초기화 중...</div>
+  </div>
+
+  <script src="message_types.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

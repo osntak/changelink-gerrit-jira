@@ -1,26 +1,24 @@
 // service_worker.js
-// All network requests (Jira API) are handled here only.
-// No DOM access. No logging of credentials, tokens, or Authorization headers.
+// All Jira API network requests are handled here only.
+// No credential/token/Authorization logging.
 
 'use strict';
 
-// ── Allowlists (minimal, fixed) ───────────────────────────────────────────────
+importScripts('message_types.js');
+
+const MSG = self.MESSAGE_TYPES;
 
 const GERRIT_ORIGINS = [
   'http://gerrit.example.com',
   'https://gerrit.example.com',
 ];
 
-/** Single allowed Jira base URL. Never interpolated from user/page input. */
 const JIRA_BASE = 'https://yourcompany.atlassian.net';
+const JIRA_ALLOWED_HOST = 'yourcompany.atlassian.net';
 
-/**
- * Default Jira comment template (used when none is saved in options).
- * Supported placeholders: {title} {body} {branch} {change_num} {project}
- *                         {owner} {date} {url}
- */
 const DEFAULT_TEMPLATE =
-`{title}
+`[auto:gerrit]
+{title}
 
 {body}
 
@@ -28,9 +26,6 @@ const DEFAULT_TEMPLATE =
 반영 일시: {date}
 Gerrit: {url}`;
 
-// ── Validation helpers ────────────────────────────────────────────────────────
-
-/** Returns true when the tab URL belongs to the allowed Gerrit instance. */
 function isGerritTab(url) {
   try {
     return GERRIT_ORIGINS.includes(new URL(url).origin);
@@ -39,25 +34,6 @@ function isGerritTab(url) {
   }
 }
 
-/**
- * Validates that a Jira issue key is structurally correct.
- * Prevents path-traversal or injection via the key segment in the API URL.
- *
- * @param {string} key
- * @returns {boolean}
- */
-function isValidIssueKey(key) {
-  return typeof key === 'string' && /^[A-Z][A-Z0-9]+-\d+$/.test(key);
-}
-
-/**
- * Validates that a change URL originates from the allowed Gerrit domains.
- * The content script is sandboxed to Gerrit pages, but we re-validate here
- * so the Jira comment never contains a URL from an unexpected origin.
- *
- * @param {string} url
- * @returns {boolean}
- */
 function isAllowedChangeUrl(url) {
   try {
     return GERRIT_ORIGINS.includes(new URL(url).origin);
@@ -66,12 +42,17 @@ function isAllowedChangeUrl(url) {
   }
 }
 
-// ── Messaging helpers ─────────────────────────────────────────────────────────
+function isValidIssueKey(key) {
+  return typeof key === 'string' && /^[A-Z][A-Z0-9]+-\d+$/.test(key);
+}
 
-/**
- * Send a message to the content script running in `tabId`.
- * Resolves with the response or rejects if the content script is not ready.
- */
+function assertAllowedJiraBase() {
+  const host = new URL(JIRA_BASE).hostname;
+  if (host !== JIRA_ALLOWED_HOST) {
+    throw new Error('Jira base URL is not allowed');
+  }
+}
+
 function sendToTab(tabId, message) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {
@@ -84,105 +65,13 @@ function sendToTab(tabId, message) {
   });
 }
 
-/** Fire-and-forget toast helper (errors silently discarded). */
-function toastTab(tabId, message, toastType = 'error') {
-  chrome.tabs.sendMessage(tabId, { type: 'SHOW_TOAST', message, toastType });
-}
-
-// ── Action click handler ──────────────────────────────────────────────────────
-
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab.url || !isGerritTab(tab.url)) {
-    toastTab(tab.id, 'Gerrit change 페이지에서만 사용할 수 있습니다.', 'warn');
-    return;
-  }
-  await handleGerritAction(tab);
-});
-
-// ── Main orchestration ────────────────────────────────────────────────────────
-
-/**
- * Full pipeline for a valid Gerrit tab:
- *   1. Extract subject / issueKey / url via the content script.
- *   2. Validate extracted data (key format, URL origin).
- *   3. Load credentials from chrome.storage.local.
- *   4. POST ADF comment to Jira (status code only used; body discarded).
- *   5. Show result toast.
- */
-async function handleGerritAction(tab) {
-  // ── Step 1: page info extraction ──────────────────────────────────────────
-  let info;
-  try {
-    info = await sendToTab(tab.id, { type: 'EXTRACT_INFO' });
-  } catch {
-    toastTab(
-      tab.id,
-      '페이지 정보를 읽을 수 없습니다. 페이지를 새로고침 후 다시 시도하세요.',
-    );
-    return;
-  }
-
-  const { subject = '', issueKey, url } = info ?? {};
-
-  // ── Step 2: validate extracted values ─────────────────────────────────────
-  if (!isValidIssueKey(issueKey)) {
-    toastTab(
-      tab.id,
-      '이슈 키를 찾지 못했습니다 (예: PROJ-123). 제목 또는 커밋 메시지에 "jira: KEY" 형식으로 추가하세요.',
-      'warn',
-    );
-    return;
-  }
-
-  if (!isAllowedChangeUrl(url)) {
-    toastTab(tab.id, '현재 페이지 URL이 허용된 Gerrit 도메인이 아닙니다.');
-    return;
-  }
-
-  // Sanitise subject: trim whitespace, cap length to prevent oversized comments.
-  const safeSubject = String(subject).trim().slice(0, 500) || '(no title)';
-
-  // ── Step 3: load credentials + template ───────────────────────────────────
-  const { jiraEmail, jiraToken, commentTemplate } = await loadStorageData();
-
-  if (!jiraEmail || !jiraToken) {
-    toastTab(
-      tab.id,
-      'Jira 이메일/토큰이 설정되지 않았습니다. 확장프로그램 옵션 페이지에서 설정하세요.',
-    );
-    return;
-  }
-
-  // ── Step 4: render template → POST comment ────────────────────────────────
-  const template = (commentTemplate || '').trim() || DEFAULT_TEMPLATE;
-  const rendered = renderTemplate(template, {
-    title:     safeSubject,
-    body:      String(info.body      ?? '').trim(),
-    branch:    String(info.branch    ?? '').trim(),
-    changeNum: String(info.changeNum ?? '').trim(),
-    project:   String(info.project   ?? '').trim(),
-    owner:     String(info.owner     ?? '').trim(),
-    date:      formatDate(new Date()),
-    url,
+function getActiveTab() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      resolve(tabs && tabs[0] ? tabs[0] : null);
+    });
   });
-
-  let status;
-  try {
-    status = await postJiraComment(issueKey, url, rendered, jiraEmail, jiraToken);
-  } catch {
-    toastTab(tab.id, '네트워크 오류가 발생했습니다. 인터넷 연결을 확인하세요.');
-    return;
-  }
-
-  // ── Step 5: report result ──────────────────────────────────────────────────
-  if (status === 201) {
-    toastTab(tab.id, `Jira 댓글 추가 완료: ${issueKey}`, 'success');
-  } else {
-    toastTab(tab.id, mapJiraError(status));
-  }
 }
-
-// ── Storage ───────────────────────────────────────────────────────────────────
 
 function loadStorageData() {
   return new Promise((resolve) => {
@@ -193,101 +82,83 @@ function loadStorageData() {
   });
 }
 
-// ── Comment template ──────────────────────────────────────────────────────────
+async function getActiveGerritContext() {
+  const tab = await getActiveTab();
+  if (!tab || !tab.id || !tab.url || !isGerritTab(tab.url)) {
+    return {
+      ok: false,
+      message: 'Gerrit change 페이지에서 팝업을 열어주세요.',
+    };
+  }
 
-/**
- * Replaces all `{placeholder}` tokens in the template with actual values.
- * Collapses 3+ consecutive newlines to 2 so an empty {body} doesn't leave
- * a double blank line in the Jira comment.
- *
- * @param {string} template
- * @param {{ title: string, body: string, branch: string, changeNum: string,
- *           project: string, owner: string, date: string, url: string }} vars
- * @returns {string}
- */
+  try {
+    const context = await sendToTab(tab.id, { type: MSG.EXTRACT_CONTEXT });
+    const safeContext = {
+      issueKey: isValidIssueKey(context?.issueKey || '') ? context.issueKey : null,
+      subject: String(context?.subject || '').trim().slice(0, 500),
+      gerritUrl: String(context?.gerritUrl || tab.url),
+      branch: String(context?.branch || '').trim(),
+      body: String(context?.body || '').trim(),
+      changeNum: String(context?.changeNum || '').trim(),
+      project: String(context?.project || '').trim(),
+      owner: String(context?.owner || '').trim(),
+      changeId: String(context?.changeId || '').trim(),
+    };
+
+    if (!isAllowedChangeUrl(safeContext.gerritUrl)) {
+      return { ok: false, message: '허용된 Gerrit 도메인이 아닙니다.' };
+    }
+
+    return { ok: true, tabId: tab.id, context: safeContext };
+  } catch {
+    return {
+      ok: false,
+      message: '페이지 정보를 읽을 수 없습니다. 페이지를 새로고침 후 다시 시도하세요.',
+    };
+  }
+}
+
+function formatDate(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function renderTemplate(template, vars) {
   return template
-    .replace(/\{title\}/g,      vars.title     ?? '')
-    .replace(/\{body\}/g,       vars.body      ?? '')
-    .replace(/\{branch\}/g,     vars.branch    ?? '')
+    .replace(/\{title\}/g, vars.title ?? '')
+    .replace(/\{body\}/g, vars.body ?? '')
+    .replace(/\{branch\}/g, vars.branch ?? '')
     .replace(/\{change_num\}/g, vars.changeNum ?? '')
-    .replace(/\{project\}/g,    vars.project   ?? '')
-    .replace(/\{owner\}/g,      vars.owner     ?? '')
-    .replace(/\{date\}/g,       vars.date      ?? '')
-    .replace(/\{url\}/g,        vars.url       ?? '')
-    .replace(/\n{3,}/g, '\n\n')   // collapse extra blank lines from empty vars
+    .replace(/\{project\}/g, vars.project ?? '')
+    .replace(/\{owner\}/g, vars.owner ?? '')
+    .replace(/\{date\}/g, vars.date ?? '')
+    .replace(/\{url\}/g, vars.url ?? '')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-/**
- * Formats a Date to a human-readable Korean locale string, e.g.
- * "2025-02-23 14:30"
- *
- * @param {Date} d
- * @returns {string}
- */
-function formatDate(d) {
-  const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-         `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+function ensureCommentMinimum(text, vars) {
+  let out = (text || '').trim();
+
+  if (!out.includes('[auto:gerrit]')) {
+    out = `[auto:gerrit]\n${out}`.trim();
+  }
+  if (vars.title && !out.includes(vars.title)) {
+    out = `${out}\n\n제목: ${vars.title}`;
+  }
+  if (vars.url && !out.includes(vars.url)) {
+    out = `${out}\nGerrit: ${vars.url}`;
+  }
+
+  return out.trim();
 }
 
-// ── Jira API ──────────────────────────────────────────────────────────────────
-
-/**
- * POST an ADF comment to the specified Jira issue.
- *
- * Security notes:
- *   - JIRA_BASE is a fixed constant — never derived from user/page input.
- *   - issueKey is validated by isValidIssueKey() before reaching here.
- *   - Authorization header is NEVER logged.
- *   - Only the HTTP status code is returned; the response body is discarded.
- *
- * @param {string} issueKey    e.g. "PROJ-123"
- * @param {string} changeUrl   validated Gerrit change URL (used to make links)
- * @param {string} rendered    fully-rendered template string
- * @param {string} email       Jira account email
- * @param {string} token       Jira API token
- * @returns {Promise<number>}  HTTP status code
- */
-async function postJiraComment(issueKey, changeUrl, rendered, email, token) {
-  const apiUrl =
-    `${JIRA_BASE}/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`;
-
-  const resp = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${btoa(`${email}:${token}`)}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(textToAdf(rendered, changeUrl)),
-  });
-
-  return resp.status;
-}
-
-// ── ADF builder ───────────────────────────────────────────────────────────────
-
-/**
- * Converts a plain-text string into an ADF (Atlassian Document Format) doc.
- *
- * Rules:
- *   - Double newlines  → paragraph boundaries
- *   - Single newlines  → hardBreak within a paragraph
- *   - Any occurrence of `linkUrl` in the text → inline hyperlink
- *
- * @param {string} text
- * @param {string} linkUrl  URL to auto-link wherever it appears in the text
- * @returns {object}        ADF comment payload  { body: { type:'doc', ... } }
- */
 function textToAdf(text, linkUrl) {
   const paragraphs = text
     .split(/\n\n+/)
-    .map(p => buildAdfParagraph(p, linkUrl))
-    .filter(p => p.content.length > 0);
+    .map((p) => buildAdfParagraph(p, linkUrl))
+    .filter((p) => p.content.length > 0);
 
-  // Ensure the doc always has at least one paragraph (ADF requirement)
   if (paragraphs.length === 0) {
     paragraphs.push({ type: 'paragraph', content: [{ type: 'text', text: '' }] });
   }
@@ -295,10 +166,6 @@ function textToAdf(text, linkUrl) {
   return { body: { type: 'doc', version: 1, content: paragraphs } };
 }
 
-/**
- * Builds a single ADF paragraph node from a paragraph string.
- * Newlines within the paragraph become `hardBreak` nodes.
- */
 function buildAdfParagraph(paraText, linkUrl) {
   const nodes = [];
   const lines = paraText.split('\n');
@@ -311,66 +178,329 @@ function buildAdfParagraph(paraText, linkUrl) {
   return { type: 'paragraph', content: nodes };
 }
 
-/**
- * Splits a single line of text into ADF inline nodes.
- * If the line contains `linkUrl`, that substring becomes a clickable link.
- */
 function inlineNodesForLine(line, linkUrl) {
-  if (!linkUrl || !line.includes(linkUrl)) {
-    return line ? [{ type: 'text', text: line }] : [];
+  if (!line) return [];
+  if (!linkUrl || !line.includes(linkUrl)) return [{ type: 'text', text: line }];
+
+  const nodes = [];
+  let cursor = 0;
+
+  while (cursor < line.length) {
+    const idx = line.indexOf(linkUrl, cursor);
+    if (idx === -1) {
+      const tail = line.slice(cursor);
+      if (tail) nodes.push({ type: 'text', text: tail });
+      break;
+    }
+
+    const before = line.slice(cursor, idx);
+    if (before) nodes.push({ type: 'text', text: before });
+
+    nodes.push({
+      type: 'text',
+      text: linkUrl,
+      marks: [{ type: 'link', attrs: { href: linkUrl } }],
+    });
+
+    cursor = idx + linkUrl.length;
   }
 
-  const idx = line.indexOf(linkUrl);
-  const nodes = [];
-  if (idx > 0) nodes.push({ type: 'text', text: line.slice(0, idx) });
-  nodes.push({
-    type: 'text',
-    text: linkUrl,
-    marks: [{ type: 'link', attrs: { href: linkUrl } }],
-  });
-  const after = line.slice(idx + linkUrl.length);
-  if (after) nodes.push({ type: 'text', text: after });
   return nodes;
 }
 
-/**
- * Maps Jira HTTP status codes to user-friendly Korean error messages.
- * Only the status code is exposed — never the response body.
- *
- * @param {number} status
- * @returns {string}
- */
 function mapJiraError(status) {
   switch (status) {
-    case 400: return '잘못된 요청 (400): ADF 형식 또는 이슈 키를 확인하세요.';
+    case 400: return '잘못된 요청 (400): 이슈 키 또는 요청 형식을 확인하세요.';
     case 401: return '인증 실패 (401): Jira 이메일 또는 API 토큰을 확인하세요.';
-    case 403: return '권한 없음 (403): 해당 이슈에 코멘트 권한이 없습니다.';
-    case 404: return '이슈를 찾을 수 없음 (404): 이슈 키 또는 Jira 프로젝트를 확인하세요.';
-    case 429: return '요청 제한 초과 (429): 잠시 후 다시 시도하세요.';
-    default:  return `Jira API 오류: HTTP ${status}`;
+    case 403: return '권한 없음 (403): 해당 작업 권한이 없습니다.';
+    case 404: return '대상을 찾을 수 없음 (404): 이슈 키를 확인하세요.';
+    default: return `Jira API 오류: HTTP ${status}`;
   }
 }
 
-// ── Connection test (from options page) ───────────────────────────────────────
+function mapClientError(err, fallbackMessage) {
+  if (!err) return fallbackMessage;
+  if (err.code === 'missing_credentials') {
+    return 'Jira 이메일/토큰이 설정되지 않았습니다. 옵션 페이지에서 설정하세요.';
+  }
+  if (err.code === 'invalid_issue_key') {
+    return 'PROJ-123 같은 이슈키가 필요합니다. 제목 또는 커밋 메시지에 jira: KEY를 추가하세요.';
+  }
+  if (err.code === 'invalid_gerrit_url') {
+    return '현재 페이지 URL이 허용된 Gerrit 도메인이 아닙니다.';
+  }
+  if (typeof err.status === 'number') {
+    return mapJiraError(err.status);
+  }
+  if (err.code === 'network_error') {
+    return '네트워크 오류가 발생했습니다. 인터넷 연결을 확인하세요.';
+  }
+  return fallbackMessage;
+}
+
+const jiraClient = {
+  async getCredentials() {
+    const { jiraEmail, jiraToken } = await loadStorageData();
+    if (!jiraEmail || !jiraToken) {
+      const error = new Error('Missing credentials');
+      error.code = 'missing_credentials';
+      throw error;
+    }
+    return { email: jiraEmail, token: jiraToken };
+  },
+
+  async fetch(path, options = {}) {
+    assertAllowedJiraBase();
+    const { email, token } = await this.getCredentials();
+
+    const headers = {
+      Authorization: `Basic ${btoa(`${email}:${token}`)}`,
+      Accept: 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+    };
+
+    try {
+      return await fetch(`${JIRA_BASE}${path}`, {
+        method: options.method || 'GET',
+        headers,
+        body: options.body ? JSON.stringify(options.body) : undefined,
+      });
+    } catch {
+      const error = new Error('Network error');
+      error.code = 'network_error';
+      throw error;
+    }
+  },
+
+  async getIssue(issueKey) {
+    if (!isValidIssueKey(issueKey)) {
+      const error = new Error('Invalid issue key');
+      error.code = 'invalid_issue_key';
+      throw error;
+    }
+
+    const path = `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=summary,status,assignee`;
+    const resp = await this.fetch(path, { method: 'GET' });
+
+    if (resp.status !== 200) {
+      const error = new Error('Issue request failed');
+      error.status = resp.status;
+      throw error;
+    }
+
+    const json = await resp.json();
+    return {
+      summary: String(json?.fields?.summary || ''),
+      status: String(json?.fields?.status?.name || ''),
+      assignee: String(json?.fields?.assignee?.displayName || 'Unassigned'),
+    };
+  },
+
+  async addRemoteLink(issueKey, payload) {
+    if (!isValidIssueKey(issueKey)) {
+      const error = new Error('Invalid issue key');
+      error.code = 'invalid_issue_key';
+      throw error;
+    }
+
+    const resp = await this.fetch(
+      `/rest/api/3/issue/${encodeURIComponent(issueKey)}/remotelink`,
+      {
+        method: 'POST',
+        body: payload,
+      },
+    );
+
+    if (resp.status !== 200 && resp.status !== 201) {
+      const error = new Error('Remote link request failed');
+      error.status = resp.status;
+      throw error;
+    }
+  },
+
+  async addComment(issueKey, adfDoc) {
+    if (!isValidIssueKey(issueKey)) {
+      const error = new Error('Invalid issue key');
+      error.code = 'invalid_issue_key';
+      throw error;
+    }
+
+    const resp = await this.fetch(
+      `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`,
+      {
+        method: 'POST',
+        body: { body: adfDoc },
+      },
+    );
+
+    if (resp.status !== 201) {
+      const error = new Error('Comment request failed');
+      error.status = resp.status;
+      throw error;
+    }
+  },
+};
+
+function buildRemoteLinkPayload(context) {
+  const payload = {
+    object: {
+      url: context.gerritUrl,
+      title: `Gerrit: ${context.subject || '(no title)'}`,
+    },
+  };
+
+  if (context.changeNum) {
+    payload.globalId = `gerrit:change:${context.changeNum}`;
+  } else if (context.changeId) {
+    payload.globalId = `gerrit:changeid:${context.changeId}`;
+  }
+
+  return payload;
+}
+
+async function buildCommentAdf(context) {
+  const { commentTemplate } = await loadStorageData();
+  const template = (commentTemplate || '').trim() || DEFAULT_TEMPLATE;
+
+  const rendered = renderTemplate(template, {
+    title: context.subject || '(no title)',
+    body: context.body || '',
+    branch: context.branch || '',
+    changeNum: context.changeNum || '',
+    project: context.project || '',
+    owner: context.owner || '',
+    date: formatDate(new Date()),
+    url: context.gerritUrl,
+  });
+
+  const safeText = ensureCommentMinimum(rendered, {
+    title: context.subject || '(no title)',
+    url: context.gerritUrl,
+  });
+
+  return textToAdf(safeText, context.gerritUrl).body;
+}
+
+async function handlePopupGetContext() {
+  const result = await getActiveGerritContext();
+  if (!result.ok) {
+    return { ok: false, message: result.message };
+  }
+  return { ok: true, context: result.context };
+}
+
+async function handlePopupGetIssue(issueKey) {
+  try {
+    const key = String(issueKey || '').trim();
+    const issue = await jiraClient.getIssue(key);
+    return { ok: true, issue };
+  } catch (err) {
+    return {
+      ok: false,
+      message: mapClientError(err, '이슈 조회에 실패했습니다.'),
+    };
+  }
+}
+
+async function handlePopupAddRemoteLink() {
+  const contextResp = await getActiveGerritContext();
+  if (!contextResp.ok) {
+    return { ok: false, message: contextResp.message };
+  }
+
+  const context = contextResp.context;
+  if (!context.issueKey) {
+    return {
+      ok: false,
+      message: 'PROJ-123 같은 이슈키가 필요합니다. 제목 또는 커밋 메시지에 jira: KEY를 추가하세요.',
+    };
+  }
+  if (!isAllowedChangeUrl(context.gerritUrl)) {
+    return {
+      ok: false,
+      message: '현재 페이지 URL이 허용된 Gerrit 도메인이 아닙니다.',
+    };
+  }
+
+  try {
+    await jiraClient.addRemoteLink(context.issueKey, buildRemoteLinkPayload(context));
+    return { ok: true, issueKey: context.issueKey };
+  } catch (err) {
+    return {
+      ok: false,
+      message: mapClientError(err, '웹링크 추가에 실패했습니다.'),
+    };
+  }
+}
+
+async function handlePopupAddComment() {
+  const contextResp = await getActiveGerritContext();
+  if (!contextResp.ok) {
+    return { ok: false, message: contextResp.message };
+  }
+
+  const context = contextResp.context;
+  if (!context.issueKey) {
+    return {
+      ok: false,
+      message: 'PROJ-123 같은 이슈키가 필요합니다. 제목 또는 커밋 메시지에 jira: KEY를 추가하세요.',
+    };
+  }
+  if (!isAllowedChangeUrl(context.gerritUrl)) {
+    return {
+      ok: false,
+      message: '현재 페이지 URL이 허용된 Gerrit 도메인이 아닙니다.',
+    };
+  }
+
+  try {
+    const adfDoc = await buildCommentAdf(context);
+    await jiraClient.addComment(context.issueKey, adfDoc);
+    return { ok: true, issueKey: context.issueKey };
+  } catch (err) {
+    return {
+      ok: false,
+      message: mapClientError(err, '코멘트 생성에 실패했습니다.'),
+    };
+  }
+}
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type === 'TEST_CONNECTION') {
+  if (msg.type === MSG.TEST_CONNECTION) {
     handleTestConnection(msg.email, msg.token).then(sendResponse);
-    return true; // keep the message channel open for the async response
+    return true;
   }
+
+  if (msg.type === MSG.POPUP_GET_CONTEXT) {
+    handlePopupGetContext().then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === MSG.POPUP_GET_ISSUE) {
+    handlePopupGetIssue(msg.issueKey).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === MSG.POPUP_ADD_REMOTE_LINK) {
+    handlePopupAddRemoteLink().then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === MSG.POPUP_ADD_COMMENT) {
+    handlePopupAddComment().then(sendResponse);
+    return true;
+  }
+
+  return false;
 });
 
-/**
- * Tests Jira credentials via GET /rest/api/3/myself.
- * Returns only { status } — the response body is completely discarded.
- * Called exclusively by the options page via chrome.runtime.sendMessage.
- *
- * @param {string} email
- * @param {string} token
- * @returns {Promise<{status: number|null, networkError?: boolean}>}
- */
 async function handleTestConnection(email, token) {
+  if (!email || !token) {
+    return { status: 401 };
+  }
+
   try {
+    assertAllowedJiraBase();
     const resp = await fetch(`${JIRA_BASE}/rest/api/3/myself`, {
       method: 'GET',
       headers: {
