@@ -7,6 +7,7 @@
 const MSG = self.MESSAGE_TYPES;
 const FAB_ROOT_ID = 'gj-fab-root';
 const ISSUE_DIALOG_ID = '__gj_issue_dialog__';
+const FAB_SCHEMA_VERSION = '2';
 const NETWORK_HOOK_SCRIPT_ID = '__gj_network_hook__';
 const NETWORK_CONTEXT_EVENT_TYPE = 'GJ_NETWORK_CONTEXT';
 
@@ -311,6 +312,9 @@ function extractCommitBody() {
     .split('\n')
     .slice(1)
     .filter((line) => !/^\s*jira\s*:/i.test(line))
+    .filter((line) => !/^\s*change-id\s*:/i.test(line))
+    .filter((line) => !/^\s*cherry[- ]picked\s+from\b/i.test(line))
+    .filter((line) => !/^\s*cherry[- ]picked[- ]from\s*:/i.test(line))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -633,13 +637,17 @@ function openJiraIssueInNewTab() {
   window.open(`${JIRA_BASE}/browse/${encodeURIComponent(key)}`, '_blank', 'noopener,noreferrer');
 }
 
-function buildFabActionButton({ id, icon, title, onClick }) {
+function buildFabActionButton({ id, icon, title, onClick, iconSvg }) {
   const btn = document.createElement('button');
   btn.id = id;
   btn.type = 'button';
   btn.title = title;
   btn.setAttribute('aria-label', title);
-  btn.textContent = icon;
+  if (iconSvg) {
+    btn.innerHTML = iconSvg;
+  } else {
+    btn.textContent = icon;
+  }
 
   Object.assign(btn.style, {
     width: '42px',
@@ -666,10 +674,17 @@ function buildFabActionButton({ id, icon, title, onClick }) {
 }
 
 function renderFab() {
-  if (document.getElementById(FAB_ROOT_ID)) return;
+  const existing = document.getElementById(FAB_ROOT_ID);
+  if (existing) {
+    const sameVersion = existing.getAttribute('data-fab-version') === FAB_SCHEMA_VERSION;
+    const hasOpenIssueButton = !!existing.querySelector('#gj-fab-open-issue');
+    if (sameVersion && hasOpenIssueButton) return;
+    existing.remove();
+  }
 
   const root = document.createElement('div');
   root.id = FAB_ROOT_ID;
+  root.setAttribute('data-fab-version', FAB_SCHEMA_VERSION);
 
   Object.assign(root.style, {
     position: 'fixed',
@@ -693,6 +708,13 @@ function renderFab() {
   });
 
   menu.appendChild(buildFabActionButton({
+    id: 'gj-fab-open-issue',
+    iconSvg: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7"></path><path d="M10 14 21 3"></path><path d="M21 14v7h-7"></path><path d="M3 10v11h11"></path></svg>',
+    title: '이슈 페이지 이동',
+    onClick: openJiraIssueInNewTab,
+  }));
+
+  menu.appendChild(buildFabActionButton({
     id: 'gj-fab-issue',
     icon: '🔍',
     title: '이슈 조회',
@@ -711,13 +733,6 @@ function renderFab() {
     icon: '💬',
     title: '코멘트 생성',
     onClick: handleFabAddComment,
-  }));
-
-  menu.appendChild(buildFabActionButton({
-    id: 'gj-fab-open-issue',
-    icon: '↗',
-    title: '이슈 페이지 이동',
-    onClick: openJiraIssueInNewTab,
   }));
 
   const mainButton = document.createElement('button');

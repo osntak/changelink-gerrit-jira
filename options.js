@@ -25,7 +25,8 @@ const DEFAULT_TEMPLATE =
 {body}
 브랜치: {branch}
 반영 일시: {date}
-Gerrit: {url}`;
+Gerrit: {url}
+Change-Id: {change_id}`;
 
 // ── Status helper ─────────────────────────────────────────────────────────────
 

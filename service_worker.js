@@ -23,7 +23,8 @@ const DEFAULT_TEMPLATE =
 
 브랜치: {branch}
 반영 일시: {date}
-Gerrit: {url}`;
+Gerrit: {url}
+Change-Id: {change_id}`;
 
 function isGerritTab(url) {
   try {
@@ -162,6 +163,7 @@ function renderTemplate(template, vars) {
     .replace(/\{body\}/g, vars.body ?? '')
     .replace(/\{branch\}/g, vars.branch ?? '')
     .replace(/\{change_num\}/g, vars.changeNum ?? '')
+    .replace(/\{change_id\}/g, vars.changeId ?? '')
     .replace(/\{project\}/g, vars.project ?? '')
     .replace(/\{owner\}/g, vars.owner ?? '')
     .replace(/\{date\}/g, vars.date ?? '')
@@ -251,7 +253,7 @@ function mapJiraError(status) {
 function mapClientError(err, fallbackMessage) {
   if (!err) return fallbackMessage;
   if (err.code === 'missing_credentials') {
-    return 'Jira 이메일/토큰이 설정되지 않았습니다. 옵션 페이지에서 설정하세요.';
+    return 'Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.';
   }
   if (err.code === 'invalid_issue_key') {
     return 'PROJ-123 같은 이슈키가 필요합니다. 제목 또는 커밋 메시지에 jira: KEY를 추가하세요.';
@@ -397,6 +399,7 @@ async function buildCommentAdf(context) {
     body: context.body || '',
     branch: context.branch || '',
     changeNum: context.changeNum || '',
+    changeId: context.changeId || '',
     project: context.project || '',
     owner: context.owner || '',
     date: formatDate(new Date()),
@@ -417,6 +420,14 @@ async function handlePopupGetContext() {
     return { ok: false, message: result.message };
   }
   return { ok: true, context: result.context };
+}
+
+async function handlePopupGetAuthState() {
+  const { jiraEmail, jiraToken } = await loadStorageData();
+  return {
+    ok: true,
+    configured: !!(jiraEmail && jiraToken),
+  };
 }
 
 async function handlePopupGetIssue(issueKey) {
@@ -533,6 +544,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   if (msg.type === MSG.POPUP_GET_CONTEXT) {
     handlePopupGetContext().then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === MSG.POPUP_GET_AUTH_STATE) {
+    handlePopupGetAuthState().then(sendResponse);
     return true;
   }
 
