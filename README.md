@@ -57,6 +57,12 @@ Gerrit change 페이지(`.../c/.../+/...`)에서 확장 아이콘 클릭.
 
 - 자동 감지 성공 시 키 자동 입력
 - 필요하면 수동으로 `PROJ-123` 형태 입력
+- 자동 감지 우선순위:
+- 1) 커밋 메시지의 `JIRA: KEY`
+- 2) 커밋 메시지의 bare key
+- 3) 페이지 내용 fallback
+- 4) 제목(subject/title) 마지막 fallback
+- Gerrit `detail` JSON(`current_revision -> revisions[..].commit.message`)도 fallback 소스로 사용
 
 ### FAB 액션
 
