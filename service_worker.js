@@ -36,7 +36,8 @@ function isGerritTab(url) {
 
 function isAllowedChangeUrl(url) {
   try {
-    return GERRIT_ORIGINS.includes(new URL(url).origin);
+    const parsed = new URL(url);
+    return GERRIT_ORIGINS.includes(parsed.origin) && /\/c\/.+\/\+\/\d+/.test(parsed.pathname);
   } catch {
     return false;
   }
@@ -122,6 +123,12 @@ async function getActiveGerritContext() {
     return {
       ok: false,
       message: 'Gerrit change 페이지에서 팝업을 열어주세요.',
+    };
+  }
+  if (!isAllowedChangeUrl(tab.url)) {
+    return {
+      ok: false,
+      message: 'Gerrit change 상세 페이지(/c/.../+/번호)에서 실행하세요.',
     };
   }
 
