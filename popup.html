@@ -46,6 +46,26 @@
       color: var(--pri);
     }
 
+    .head-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--sub);
+      font-size: 15px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+    }
+
     .kv {
       margin-top: 8px;
       display: grid;
@@ -174,7 +194,10 @@
 <body>
   <div class="wrap">
     <section class="panel">
-      <h1>Gerrit Jira Tools</h1>
+      <div class="head-row">
+        <h1>Gerrit Jira Tools</h1>
+        <button id="btn-options" class="icon-btn" title="옵션 열기" aria-label="옵션 열기">⚙</button>
+      </div>
       <div class="kv">
         <div>Detected issue key</div>
         <div id="issue-key" class="value">-</div>

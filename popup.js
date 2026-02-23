@@ -13,6 +13,7 @@ const btnRefresh = document.getElementById('btn-refresh');
 const btnLink = document.getElementById('btn-link');
 const btnComment = document.getElementById('btn-comment');
 const fabEnabledEl = document.getElementById('fab-enabled');
+const btnOptions = document.getElementById('btn-options');
 
 let currentContext = null;
 
@@ -219,6 +220,9 @@ btnLink.addEventListener('click', addRemoteLink);
 btnComment.addEventListener('click', addComment);
 fabEnabledEl.addEventListener('change', () => {
   setFabEnabled(fabEnabledEl.checked);
+});
+btnOptions.addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
 });
 
 (async () => {
