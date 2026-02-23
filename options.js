@@ -9,6 +9,8 @@
 
 'use strict';
 
+const MSG = self.MESSAGE_TYPES;
+
 const emailEl    = /** @type {HTMLInputElement}  */ (document.getElementById('email'));
 const tokenEl    = /** @type {HTMLInputElement}  */ (document.getElementById('token'));
 const templateEl = /** @type {HTMLTextAreaElement} */ (document.getElementById('template'));
@@ -19,7 +21,8 @@ const btnReset   = document.getElementById('btn-reset');
 
 // Must match DEFAULT_TEMPLATE in service_worker.js
 const DEFAULT_TEMPLATE =
-`{title}
+`[auto:gerrit]
+{title}
 
 {body}
 
@@ -115,7 +118,7 @@ btnTest.addEventListener('click', async () => {
     // The service worker discards the response body and returns only { status }.
     result = await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
-        { type: 'TEST_CONNECTION', email, token },
+        { type: MSG.TEST_CONNECTION, email, token },
         (response) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
