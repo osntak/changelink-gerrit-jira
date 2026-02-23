@@ -66,6 +66,59 @@
       margin-top: 10px;
     }
 
+    .toggle-row {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--sub);
+    }
+
+    .switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      display: inline-block;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: #c7d1e2;
+      transition: background 0.2s ease;
+      cursor: pointer;
+    }
+
+    .slider::before {
+      content: '';
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      left: 3px;
+      top: 3px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.2s ease;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .switch input:checked + .slider {
+      background: var(--pri);
+    }
+
+    .switch input:checked + .slider::before {
+      transform: translateX(20px);
+    }
+
     button {
       border: 1px solid var(--line);
       background: #fff;
@@ -133,6 +186,14 @@
         <button id="btn-refresh" class="primary">이슈 조회 / 새로고침</button>
         <button id="btn-link">웹링크 추가</button>
         <button id="btn-comment">코멘트 생성</button>
+      </div>
+
+      <div class="toggle-row">
+        <span>Enable FAB</span>
+        <label class="switch" for="fab-enabled">
+          <input id="fab-enabled" type="checkbox">
+          <span class="slider"></span>
+        </label>
       </div>
 
       <div id="issue-card" class="issue-card">

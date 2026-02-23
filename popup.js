@@ -12,6 +12,7 @@ const statusEl = document.getElementById('status');
 const btnRefresh = document.getElementById('btn-refresh');
 const btnLink = document.getElementById('btn-link');
 const btnComment = document.getElementById('btn-comment');
+const fabEnabledEl = document.getElementById('fab-enabled');
 
 let currentContext = null;
 
@@ -41,6 +42,16 @@ function renderContext(context) {
   issueKeyEl.textContent = context.issueKey || '-';
   subjectEl.textContent = context.subject || '(제목 없음)';
   syncActionButtons();
+}
+
+function loadFabSetting() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['fabEnabled'], ({ fabEnabled }) => {
+      const enabled = fabEnabled !== false;
+      fabEnabledEl.checked = enabled;
+      resolve(enabled);
+    });
+  });
 }
 
 function renderIssueCard(issue) {
@@ -80,7 +91,6 @@ async function loadContext() {
     }
 
     renderContext(resp.context);
-    setButtonsEnabled(true);
 
     if (!resp.context.issueKey) {
       hideIssueCard();
@@ -97,6 +107,31 @@ async function loadContext() {
     syncActionButtons();
     setStatus('확장프로그램과 통신할 수 없습니다. 확장프로그램을 다시 로드하세요.', 'err');
     return false;
+  }
+}
+
+async function setFabEnabled(enabled) {
+  fabEnabledEl.disabled = true;
+  try {
+    const resp = await sendMessage({
+      type: MSG.POPUP_SET_FAB_ENABLED,
+      enabled: !!enabled,
+    });
+    if (!resp?.ok) {
+      setStatus(resp?.message || 'FAB 설정 저장에 실패했습니다.', 'err');
+      fabEnabledEl.checked = !enabled;
+      return;
+    }
+    if (resp.message) {
+      setStatus(resp.message, 'warn');
+    } else {
+      setStatus(`FAB ${enabled ? '활성화' : '비활성화'} 완료`, 'ok');
+    }
+  } catch {
+    fabEnabledEl.checked = !enabled;
+    setStatus('FAB 설정 변경 중 오류가 발생했습니다.', 'err');
+  } finally {
+    fabEnabledEl.disabled = false;
   }
 }
 
@@ -182,10 +217,14 @@ btnRefresh.addEventListener('click', async () => {
 
 btnLink.addEventListener('click', addRemoteLink);
 btnComment.addEventListener('click', addComment);
+fabEnabledEl.addEventListener('change', () => {
+  setFabEnabled(fabEnabledEl.checked);
+});
 
 (async () => {
   currentContext = null;
   syncActionButtons();
+  await loadFabSetting();
   const ready = await loadContext();
   if (ready) {
     await fetchIssue();
