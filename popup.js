@@ -283,7 +283,7 @@ btnRefresh.addEventListener('click', async () => {
   if (ready && authConfigured) {
     await fetchIssue();
   } else if (ready) {
-    setStatus('컨텍스트 새로고침 완료. Jira 인증 후 이슈 조회를 사용할 수 있습니다.', 'warn');
+    setStatus('컨텍스트 새로고침 완료.\nJira 인증 후 이슈 조회를 사용할 수 있습니다.', 'warn');
   }
   setActionBusy(false);
 });

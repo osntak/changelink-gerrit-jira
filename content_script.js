@@ -23,6 +23,7 @@ let networkContextCache = {
 };
 
 const JIRA_BASE = 'https://yourcompany.atlassian.net';
+let detailFetchInFlight = null;
 
 // -- Shadow-DOM helpers -------------------------------------------------------
 
@@ -76,6 +77,59 @@ function parseGerritJson(raw) {
   }
 }
 
+function buildGerritDetailCandidates() {
+  const changeNum = extractChangeNum();
+  const project = extractProject();
+  if (!changeNum) return [];
+
+  const list = [];
+  if (project) {
+    const id = encodeURIComponent(`${project}~${changeNum}`);
+    list.push(`/a/changes/${id}/detail?o=CURRENT_REVISION&o=CURRENT_COMMIT`);
+    list.push(`/changes/${id}/detail?o=CURRENT_REVISION&o=CURRENT_COMMIT`);
+  }
+
+  const numeric = encodeURIComponent(changeNum);
+  list.push(`/a/changes/${numeric}/detail?o=CURRENT_REVISION&o=CURRENT_COMMIT`);
+  list.push(`/changes/${numeric}/detail?o=CURRENT_REVISION&o=CURRENT_COMMIT`);
+  return list;
+}
+
+async function fetchGerritDetailContext() {
+  if (detailFetchInFlight) return detailFetchInFlight;
+
+  detailFetchInFlight = (async () => {
+    const candidates = buildGerritDetailCandidates();
+    for (const path of candidates) {
+      try {
+        const resp = await fetch(path, {
+          method: 'GET',
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        if (!resp.ok) continue;
+
+        const text = await resp.text();
+        const payload = parseGerritJson(text);
+        const derived = deriveContextFromPayload(payload);
+        if (!derived) continue;
+
+        mergeNetworkContext(derived);
+        return derived;
+      } catch {
+        // Try next candidate endpoint.
+      }
+    }
+    return null;
+  })();
+
+  try {
+    return await detailFetchInFlight;
+  } finally {
+    detailFetchInFlight = null;
+  }
+}
+
 function deriveContextFromPayload(payload) {
   if (!payload || typeof payload !== 'object') return null;
 
@@ -90,22 +144,26 @@ function deriveContextFromPayload(payload) {
   const currentRevision = currentRevisionKey ? revisions[currentRevisionKey] : null;
   const commitMessage = String(currentRevision?.commit?.message || '').trim();
 
+  const payloadChangeId = String(payload.change_id || '').trim();
   const changeIdMatch = commitMessage.match(/\bChange-Id\s*:\s*(I[a-f0-9]{40})\b/i);
-  const changeId = changeIdMatch ? changeIdMatch[1] : '';
+  const changeId = payloadChangeId || (changeIdMatch ? changeIdMatch[1] : '');
 
   const body = commitMessage
     ? commitMessage
       .split('\n')
       .slice(1)
       .filter((line) => !/^\s*jira\s*:/i.test(line))
+      .filter((line) => !/^\s*change-id\s*:/i.test(line))
+      .filter((line) => !/^\s*cherry[- ]picked\s+from\b/i.test(line))
+      .filter((line) => !/^\s*cherry[- ]picked[- ]from\s*:/i.test(line))
       .join('\n')
       .replace(/\n{3,}/g, '\n\n')
       .trim()
     : '';
 
   const issueKey =
+    extractIssueKeyFromCommitPreferred(commitMessage) ||
     extractIssueKeyFromText(subject) ||
-    extractIssueKeyFromText(commitMessage) ||
     null;
 
   return {
@@ -128,6 +186,18 @@ function extractIssueKeyFromText(text) {
 
   const bare = text.match(ISSUE_KEY_RE);
   if (bare) return normalizeIssueKey(bare[1]);
+
+  return null;
+}
+
+function extractIssueKeyFromCommitPreferred(commitText) {
+  if (!commitText) return null;
+
+  const tagMatch = commitText.match(JIRA_TAG_RE);
+  if (tagMatch) return normalizeIssueKey(tagMatch[1]);
+
+  const bareMatch = commitText.match(ISSUE_KEY_RE);
+  if (bareMatch) return normalizeIssueKey(bareMatch[1]);
 
   return null;
 }
@@ -181,23 +251,15 @@ function getCommitMessageText() {
 }
 
 function extractIssueKey() {
-  // 1) subject/title (preferred)
-  const subject = extractSubject();
-  const fromSubject = extractIssueKeyFromText(subject);
-  if (fromSubject) return fromSubject;
-
-  const fromTitle = extractIssueKeyFromText(document.title);
-  if (fromTitle) return fromTitle;
-
-  // 2) Gerrit API payload cache (fetch/xhr intercept)
-  if (networkContextCache.issueKey) return networkContextCache.issueKey;
-
-  // 3) commit message (jira: KEY or bare key)
+  // 1) commit message first (JIRA: KEY is most reliable)
   const commitText = getCommitMessageText();
-  const fromCommit = extractIssueKeyFromText(commitText);
+  const fromCommit = extractIssueKeyFromCommitPreferred(commitText);
   if (fromCommit) return fromCommit;
 
-  // 3.5) direct extraction from Jira browse links in rendered commit message
+  // 2) Gerrit detail payload cache
+  if (networkContextCache.issueKey) return networkContextCache.issueKey;
+
+  // 3) direct extraction from Jira browse links in rendered commit message
   for (const sel of ['a[href*="atlassian.net/browse/"]', 'a[href*="/browse/"]']) {
     const links = queryShadowAll(document, sel);
     for (const link of links) {
@@ -211,7 +273,7 @@ function extractIssueKey() {
     }
   }
 
-  // 4) fallback: page text sample (for Gerrit DOM variations)
+  // 4) content-first fallback
   const pageText = (document.body?.innerText || '').slice(0, 60000);
   const fromBody = extractIssueKeyFromText(pageText);
   if (fromBody) return fromBody;
@@ -255,6 +317,14 @@ function extractIssueKey() {
     }
   }
 
+  // 7) last resort: subject/title fallback
+  const subject = extractSubject();
+  const fromSubject = extractIssueKeyFromText(subject);
+  if (fromSubject) return fromSubject;
+
+  const fromTitle = extractIssueKeyFromText(document.title);
+  if (fromTitle) return fromTitle;
+
   return null;
 }
 
@@ -269,11 +339,33 @@ function extractProject() {
 }
 
 function extractBranch() {
+  // Priority 0: parse explicit branch query parameter from Gerrit links
+  // e.g. /q/project:OfficeFilter+branch:develop+status:merged
+  const branchLinks = queryShadowAll(document, 'a[href*="branch:"]');
+  for (const link of branchLinks) {
+    const href = String(link.getAttribute('href') || '');
+    const m = href.match(/(?:^|[+&])branch:([^+&\s]+)/i);
+    if (m && m[1]) {
+      const fromHref = decodeURIComponent(m[1]).trim();
+      if (fromHref && fromHref.length < 200) return fromHref;
+    }
+
+    const text = (link.textContent || '').trim();
+    if (text && text.length < 200) return text;
+  }
+
   const selectors = [
     '.branch .value',
+    '#branch',
     'gr-change-metadata .branch',
+    'gr-change-metadata .value a[href*="/q/branch:"]',
+    'gr-change-metadata .value a[href*="branch:"]',
     '[data-label="Branch"] .value',
+    '[data-label="branch"] .value',
+    '[data-test-id="branch"]',
     'gr-linked-chip[href*="/q/branch"]',
+    'a[href*="/q/branch:"]',
+    'a[href*="branch:"]',
     '.destBranch .value',
     '.destBranch',
   ];
@@ -282,6 +374,23 @@ function extractBranch() {
     const el = queryShadow(document, sel);
     const text = el?.textContent?.trim();
     if (text && text.length < 200) return text;
+  }
+
+  // Fallback: metadata layout with "Branch" label and neighboring value.
+  const labels = queryShadowAll(document, 'label, .label, dt, th, span, div');
+  for (const labelEl of labels) {
+    const labelText = (labelEl.textContent || '').trim().toLowerCase();
+    if (labelText !== 'branch') continue;
+
+    const row = labelEl.closest('tr, li, dl, .metadata, .section, .row, div');
+    if (!row) continue;
+
+    const valueCandidates = row.querySelectorAll('.value, dd, td, a[href*="/q/branch:"], span, div');
+    for (const candidate of valueCandidates) {
+      const value = (candidate.textContent || '').trim();
+      if (!value || value.toLowerCase() === 'branch') continue;
+      if (value.length < 200) return value;
+    }
   }
 
   return '';
@@ -356,7 +465,7 @@ function hasIssueKey(context) {
  */
 function extractContextWithRetry(timeoutMs = 1800) {
   const first = extractContext();
-  if (hasIssueKey(first)) return Promise.resolve(first);
+  if (hasIssueKey(first) && first.branch) return Promise.resolve(first);
 
   return new Promise((resolve) => {
     const startedAt = Date.now();
@@ -373,8 +482,13 @@ function extractContextWithRetry(timeoutMs = 1800) {
 
     const checkNow = () => {
       const ctx = extractContext();
-      if (hasIssueKey(ctx)) finish(ctx);
+      if (hasIssueKey(ctx) && ctx.branch) finish(ctx);
     };
+
+    // DOM만으로 충분치 않은 경우 Gerrit detail API를 한번 조회해 보강.
+    fetchGerritDetailContext().finally(() => {
+      checkNow();
+    });
 
     const observer = new MutationObserver(() => {
       checkNow();
