@@ -92,17 +92,16 @@ function extractSubject() {
  * Extracts a Jira issue key from the current Gerrit change page.
  *
  * Priority:
- *   1. Bare issue key in subject/title   → [PROJ-123] Fix bug
- *   2. "jira: KEY" in commit message DOM  → shadow-aware search
- *   3. "jira: KEY" anywhere in page text → last resort
+ *   1. "jira: KEY" annotation in commit message DOM (shadow-aware)
+ *   2. Bare issue key in subject/title (e.g. [PROJ-123] Fix bug)
+ *   Returns null if neither is found — caller shows an error toast.
+ *
+ * Rationale: commit message annotation is explicit and unambiguous.
+ * Subject-based extraction comes second because titles can contain
+ * non-issue bracketed tags like [OOXML] that happen to look like keys.
  */
 function extractIssueKey() {
-  // 1. Try subject first
-  const subject = extractSubject();
-  const fromSubject = subject.match(ISSUE_KEY_RE);
-  if (fromSubject) return fromSubject[1];
-
-  // 2. Commit message containers (various Gerrit versions)
+  // 1. "jira: KEY" in commit message blocks (various Gerrit versions)
   const commitSelectors = [
     '.commitMessage',
     'gr-formatted-text.commitMessage',
@@ -120,9 +119,10 @@ function extractIssueKey() {
     }
   }
 
-  // 3. Full-page inner-text fallback (catches any remaining rendering)
-  const jiraMatch = document.body.innerText.match(JIRA_TAG_RE);
-  if (jiraMatch) return jiraMatch[1];
+  // 2. Bare key in change subject / title
+  const subject = extractSubject();
+  const fromSubject = subject.match(ISSUE_KEY_RE);
+  if (fromSubject) return fromSubject[1];
 
   return null;
 }
