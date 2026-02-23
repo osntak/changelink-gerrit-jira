@@ -82,6 +82,12 @@ function loadStorageData() {
   });
 }
 
+function setFabEnabled(enabled) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ fabEnabled: !!enabled }, resolve);
+  });
+}
+
 async function getActiveGerritContext() {
   const tab = await getActiveTab();
   if (!tab || !tab.id || !tab.url || !isGerritTab(tab.url)) {
@@ -465,6 +471,30 @@ async function handlePopupAddComment() {
   }
 }
 
+async function handlePopupSetFabEnabled(enabled) {
+  await setFabEnabled(enabled);
+
+  const tab = await getActiveTab();
+  if (!tab || !tab.id || !tab.url || !isGerritTab(tab.url)) {
+    return {
+      ok: true,
+      message: 'FAB 설정이 저장되었습니다. Gerrit 탭에서 반영됩니다.',
+    };
+  }
+
+  try {
+    await sendToTab(tab.id, {
+      type: enabled ? MSG.FAB_ENABLE : MSG.FAB_DISABLE,
+    });
+    return { ok: true };
+  } catch {
+    return {
+      ok: true,
+      message: 'FAB 설정이 저장되었습니다. 페이지 새로고침 시 반영됩니다.',
+    };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === MSG.TEST_CONNECTION) {
     handleTestConnection(msg.email, msg.token).then(sendResponse);
@@ -488,6 +518,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   if (msg.type === MSG.POPUP_ADD_COMMENT) {
     handlePopupAddComment().then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === MSG.POPUP_SET_FAB_ENABLED) {
+    handlePopupSetFabEnabled(!!msg.enabled).then(sendResponse);
     return true;
   }
 

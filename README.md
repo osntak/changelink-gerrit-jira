@@ -5,6 +5,7 @@ Gerrit change 페이지에서 Jira 연동 3기능을 팝업으로 제공합니�
 1. 이슈 조회 (summary/status/assignee)
 2. 웹링크(Remote Link) 추가
 3. 코멘트 생성 (ADF)
+4. FAB On/Off 토글 (`chrome.storage.local.fabEnabled`, 기본값 true)
 
 ## 현재 상태 점검 (코드 기준)
 
@@ -78,8 +79,8 @@ content script에서 아래 우선순위로 탐지합니다.
 - `manifest.json`: MV3 설정, popup 진입점
 - `message_types.js`: runtime 메시지 상수
 - `service_worker.js`: JiraClient(fetch/auth/error mapping), 3기능 API 처리
-- `content_script.js`: Gerrit 컨텍스트 추출(issueKey/subject/url/changeNum/changeId)
-- `popup.html`, `popup.js`: 통합 UI(조회/웹링크/코멘트)
+- `content_script.js`: Gerrit 컨텍스트 추출 + FAB 렌더링/제거
+- `popup.html`, `popup.js`: 통합 UI(조회/웹링크/코멘트/FAB 토글)
 - `options.html`, `options.js`: 이메일/토큰/템플릿 저장 + 연결 테스트
 
 ## 설치 및 실행
@@ -101,7 +102,8 @@ content script에서 아래 우선순위로 탐지합니다.
 1. Gerrit change 페이지 열기
 2. 툴바 아이콘 클릭해서 팝업 열기
 3. `이슈 조회 / 새로고침`으로 감지 및 카드 확인
-4. `웹링크 추가` 또는 `코멘트 생성` 실행
+4. 필요 시 `Enable FAB` 토글로 Gerrit 페이지 FAB 표시 여부를 즉시 전환
+5. `웹링크 추가` 또는 `코멘트 생성` 실행
 
 ## 트러블슈팅
 
