@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UPROJ-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gerrit → Jira Comment — 옵션</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      max-width: 520px;
+      margin: 48px auto;
+      padding: 0 24px 48px;
+      color: #1a1a1a;
+      background: #f8f9fa;
+    }
+
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #1565c0;
+      border-bottom: 2px solid #1565c0;
+      padding-bottom: 10px;
+      margin-bottom: 28px;
+    }
+
+    label {
+      display: block;
+      margin: 20px 0 5px;
+      font-weight: 600;
+      font-size: 0.88rem;
+      color: #333;
+    }
+
+    input[type="email"],
+    input[type="password"] {
+      width: 100%;
+      padding: 9px 13px;
+      border: 1px solid #bbb;
+      border-radius: 5px;
+      font-size: 0.92rem;
+      background: #fff;
+      transition: border-color 0.15s;
+    }
+
+    input[type="email"]:focus,
+    input[type="password"]:focus {
+      outline: none;
+      border-color: #1565c0;
+      box-shadow: 0 0 0 2px rgba(21,101,192,0.15);
+    }
+
+    .field-note {
+      font-size: 0.76rem;
+      color: #666;
+      margin-top: 5px;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    button {
+      padding: 9px 22px;
+      border: none;
+      border-radius: 5px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    #btn-save {
+      background: #1565c0;
+      color: #fff;
+    }
+    #btn-save:hover { background: #0d47a1; }
+
+    #btn-test {
+      background: #e0e0e0;
+      color: #333;
+    }
+    #btn-test:hover { background: #bdbdbd; }
+    #btn-test:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    #status {
+      margin-top: 16px;
+      min-height: 22px;
+      font-size: 0.86rem;
+      padding: 7px 12px;
+      border-radius: 5px;
+      line-height: 1.5;
+    }
+    #status:empty { padding: 0; }
+    #status.ok  { background: #e8f5e9; color: #2e7d32; }
+    #status.err { background: #ffebee; color: #c62828; }
+    #status.inf { background: #e3f2fd; color: #1565c0; }
+
+    .section {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 7px;
+      padding: 18px 20px;
+      margin-top: 32px;
+    }
+    .section h2 {
+      font-size: 0.9rem;
+      font-weight: 700;
+      margin: 0 0 10px;
+      color: #444;
+    }
+    .section ul {
+      margin: 0;
+      padding-left: 20px;
+      font-size: 0.81rem;
+      color: #555;
+      line-height: 1.9;
+    }
+    .section a {
+      color: #1565c0;
+    }
+
+    textarea {
+      width: 100%;
+      padding: 9px 13px;
+      border: 1px solid #bbb;
+      border-radius: 5px;
+      font-size: 0.88rem;
+      font-family: 'Consolas', 'Menlo', monospace;
+      background: #fff;
+      resize: vertical;
+      min-height: 140px;
+      line-height: 1.6;
+      transition: border-color 0.15s;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #1565c0;
+      box-shadow: 0 0 0 2px rgba(21,101,192,0.15);
+    }
+
+    .placeholder-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      margin-top: 10px;
+    }
+    .placeholder-table th {
+      text-align: left;
+      padding: 5px 8px;
+      background: #f0f4ff;
+      color: #1565c0;
+      font-weight: 700;
+      border-bottom: 1px solid #d0d9f0;
+    }
+    .placeholder-table td {
+      padding: 5px 8px;
+      border-bottom: 1px solid #eee;
+      color: #444;
+    }
+    .placeholder-table td code {
+      background: #f0f4ff;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 0.82rem;
+    }
+
+    #btn-reset {
+      background: #fff;
+      color: #c62828;
+      border: 1px solid #e0e0e0;
+      font-size: 0.82rem;
+      font-weight: 500;
+      padding: 6px 14px;
+      margin-top: 8px;
+      display: block;
+    }
+    #btn-reset:hover { background: #ffebee; border-color: #c62828; }
+
+    .security-badge {
+      display: inline-block;
+      background: #e8f5e9;
+      color: #2e7d32;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 20px;
+      margin-left: 8px;
+      vertical-align: middle;
+      letter-spacing: 0.02em;
+    }
+  </style>
+</head>
+<body>
+  <h1>
+    Gerrit → Jira Comment 옵션
+    <span class="security-badge">LOCAL ONLY</span>
+  </h1>
+
+  <label for="email">Jira 이메일</label>
+  <input
+    type="email"
+    id="email"
+    placeholder="user@example.com"
+    autocomplete="username"
+    spellcheck="false"
+  >
+
+  <label for="token">Jira API 토큰</label>
+  <input
+    type="password"
+    id="token"
+    placeholder="API 토큰을 입력하세요"
+    autocomplete="current-password"
+    spellcheck="false"
+  >
+  <div class="field-note">
+    토큰은 이 기기의 로컬 스토리지에만 저장됩니다 (chrome.storage.local).
+    클라우드 동기화(sync)는 사용하지 않습니다.
+  </div>
+
+  <div class="btn-row">
+    <button id="btn-save">저장</button>
+    <button id="btn-test">연결 테스트</button>
+  </div>
+
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <div class="section">
+    <h2>Jira 댓글 템플릿</h2>
+    <p style="font-size:0.8rem;color:#555;margin:0 0 10px;">
+      아래 플레이스홀더를 자유롭게 조합하세요. 비워두면 기본값이 사용됩니다.
+    </p>
+
+    <table class="placeholder-table">
+      <thead>
+        <tr><th>플레이스홀더</th><th>치환 내용</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>{title}</code></td><td>커밋 제목 (첫 번째 줄)</td></tr>
+        <tr><td><code>{body}</code></td><td>커밋 메시지 본문 (제목·jira 라인 제외)</td></tr>
+        <tr><td><code>{branch}</code></td><td>타겟 브랜치명</td></tr>
+        <tr><td><code>{change_num}</code></td><td>Gerrit change 번호 (예: 12345)</td></tr>
+        <tr><td><code>{project}</code></td><td>저장소 경로 (예: platform/myapp)</td></tr>
+        <tr><td><code>{owner}</code></td><td>change 작성자 이름</td></tr>
+        <tr><td><code>{date}</code></td><td>반영 일시 (YYYY-MM-DD HH:MM)</td></tr>
+        <tr><td><code>{url}</code></td><td>Gerrit change 링크 (클릭 가능)</td></tr>
+      </tbody>
+    </table>
+
+    <label for="template" style="margin-top:14px;">템플릿</label>
+    <textarea
+      id="template"
+      spellcheck="false"
+      placeholder="{title}
+
+{body}
+
+브랜치: {branch}
+반영 일시: {date}
+Gerrit: {url}"
+    ></textarea>
+    <button id="btn-reset">기본값으로 초기화</button>
+  </div>
+
+  <div class="section">
+    <h2>도움말</h2>
+    <ul>
+      <li>
+        API 토큰 발급:
+        <a
+          href="https://id.atlassian.com/manage-profile/security/api-tokens"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Atlassian 계정 설정</a>
+        에서 발급하세요.
+      </li>
+      <li>
+        Gerrit change 페이지로 이동 후 툴바 아이콘을 클릭하면
+        Jira 이슈에 댓글이 자동 추가됩니다.
+      </li>
+      <li>
+        이슈 키는 change 제목(예: <code>[PROJ-123] Fix bug</code>) 또는
+        커밋 메시지의 <code>jira: PROJ-123</code> 형식에서 자동 추출됩니다.
+      </li>
+      <li>
+        연결 테스트는 Jira 인증 여부만 확인하며 응답 본문은 읽지 않습니다.
+      </li>
+    </ul>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
