@@ -66,6 +66,14 @@ function sendToTab(tabId, message) {
   });
 }
 
+function isMissingReceiverError(err) {
+  const msg = String(err?.message || '').toLowerCase();
+  return (
+    msg.includes('receiving end does not exist') ||
+    msg.includes('could not establish connection')
+  );
+}
+
 function injectContentScripts(tabId) {
   return new Promise((resolve, reject) => {
     chrome.scripting.executeScript(
@@ -87,7 +95,10 @@ function injectContentScripts(tabId) {
 async function sendToTabWithRecovery(tabId, message) {
   try {
     return await sendToTab(tabId, message);
-  } catch {
+  } catch (err) {
+    if (!isMissingReceiverError(err)) {
+      throw err;
+    }
     // Recovery path: receiver is usually missing when content script was not attached.
     await injectContentScripts(tabId);
     return sendToTab(tabId, message);
