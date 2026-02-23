@@ -2,7 +2,53 @@
 // Responsibilities: extract page info from Gerrit DOM, display toast notifications.
 // NO network requests are made here. No credentials are handled here.
 
-// ── Issue key extraction ──────────────────────────────────────────────────────
+'use strict';
+
+// ── Shadow-DOM helpers ────────────────────────────────────────────────────────
+
+/**
+ * Recursively queries `selector` starting from `root`, piercing open shadow
+ * roots (Gerrit uses Polymer/Lit which creates nested shadow DOMs).
+ * Returns the first match, or null.
+ *
+ * @param {Document|ShadowRoot|Element} root
+ * @param {string} selector
+ * @returns {Element|null}
+ */
+function queryShadow(root, selector) {
+  // Direct hit on the current root level
+  const direct = root.querySelector(selector);
+  if (direct) return direct;
+
+  // Descend into any open shadow roots
+  for (const el of root.querySelectorAll('*')) {
+    if (el.shadowRoot) {
+      const found = queryShadow(el.shadowRoot, selector);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * Like queryShadow but returns ALL matches across every shadow root.
+ *
+ * @param {Document|ShadowRoot|Element} root
+ * @param {string} selector
+ * @returns {Element[]}
+ */
+function queryShadowAll(root, selector) {
+  const results = Array.from(root.querySelectorAll(selector));
+
+  for (const el of root.querySelectorAll('*')) {
+    if (el.shadowRoot) {
+      results.push(...queryShadowAll(el.shadowRoot, selector));
+    }
+  }
+  return results;
+}
+
+// ── Issue-key extraction ──────────────────────────────────────────────────────
 
 /** Matches bare Jira issue keys (e.g. PROJ-123, PROJ-45). */
 const ISSUE_KEY_RE = /\b([A-Z][A-Z0-9]+-\d+)\b/;
@@ -11,44 +57,44 @@ const ISSUE_KEY_RE = /\b([A-Z][A-Z0-9]+-\d+)\b/;
 const JIRA_TAG_RE = /jira\s*:\s*([A-Z][A-Z0-9]+-\d+)/i;
 
 /**
- * Extracts the Gerrit change subject/title.
- * Tries multiple selectors for different Gerrit versions/themes,
- * then falls back to document.title (Gerrit always includes the subject there).
+ * Extracts the Gerrit change subject / title.
+ *
+ * Strategy (in order):
+ *   1. Known Gerrit element selectors, shadow-DOM-aware.
+ *   2. Cleaned-up document.title as a universal fallback.
  */
 function extractSubject() {
-  // Gerrit Polymer / Lit element selectors (most to least specific)
+  // Selectors used across Gerrit versions (both Polymer and Lit)
   const selectors = [
-    'gr-change-view #subject',
-    '.header-title',
+    '#subject',                              // gr-change-view > #subject
+    '.headerSubject',                        // some themes
+    '.header-title',                         // Gerrit 3.x
     'gr-change-header .header-title',
-    'gr-change-header [slot="header"]',
+    '[data-test-id="subject"]',
     '.change-title',
     'h1.subject',
   ];
 
   for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el?.textContent?.trim()) return el.textContent.trim();
+    const el = queryShadow(document, sel);
+    const text = el?.textContent?.trim();
+    if (text) return text;
   }
 
-  // document.title usually contains the subject, e.g.:
-  //   "I1234abc: Fix login bug · Gerrit Code Review"
-  //   "Fix login bug - Gerrit"
-  const title = document.title
-    .replace(/\s*[·•|–\-]+\s*Gerrit.*/i, '')   // strip " · Gerrit Code Review" suffix
-    .replace(/^[A-Z0-9]+:\s*/i, '')              // strip leading change-id prefix
-    .trim();
-
-  return title || document.title.trim();
+  // document.title fallback: strip " · Gerrit Code Review", "- Gerrit …", etc.
+  return document.title
+    .replace(/\s*[·•|–\-]+\s*Gerrit.*/i, '')
+    .replace(/^[A-Za-z0-9]+:\s*/,          '') // strip leading Change-Id prefix
+    .trim() || document.title.trim();
 }
 
 /**
- * Extracts the Jira issue key from the current Gerrit change page.
+ * Extracts a Jira issue key from the current Gerrit change page.
  *
  * Priority:
- *   1. Bare issue key in subject/title (e.g. "[PROJ-123] Fix bug")
- *   2. "jira: KEY" annotation anywhere in the commit message block
- *   3. "jira: KEY" annotation anywhere in the full page text
+ *   1. Bare issue key in subject/title   → [PROJ-123] Fix bug
+ *   2. "jira: KEY" in commit message DOM  → shadow-aware search
+ *   3. "jira: KEY" anywhere in page text → last resort
  */
 function extractIssueKey() {
   // 1. Try subject first
@@ -60,27 +106,28 @@ function extractIssueKey() {
   const commitSelectors = [
     '.commitMessage',
     'gr-formatted-text.commitMessage',
-    'gr-commit-info .commitMessage',
+    '[slot="commitMessage"]',
     '.commit-message-container',
     '[data-testid="commit-message"]',
-    'gr-formatted-text',       // fallback: any formatted-text block
+    'gr-formatted-text',   // generic: any formatted-text block
   ];
+
   for (const sel of commitSelectors) {
-    const els = document.querySelectorAll(sel);
+    const els = queryShadowAll(document, sel);
     for (const el of els) {
       const match = el.textContent.match(JIRA_TAG_RE);
       if (match) return match[1];
     }
   }
 
-  // 3. Full-page text fallback
+  // 3. Full-page inner-text fallback (catches any remaining rendering)
   const jiraMatch = document.body.innerText.match(JIRA_TAG_RE);
   if (jiraMatch) return jiraMatch[1];
 
   return null;
 }
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
+// ── Toast notification ────────────────────────────────────────────────────────
 
 const TOAST_COLORS = {
   success: '#2e7d32',
@@ -90,8 +137,11 @@ const TOAST_COLORS = {
 };
 
 /**
- * Displays a transient notification in the top-right corner of the page.
- * Auto-dismisses after 4 seconds with a fade-out transition.
+ * Shows a transient notification in the top-right corner.
+ * Auto-dismisses after 4 s with a CSS fade-out.
+ *
+ * @param {string} message
+ * @param {'success'|'error'|'warn'|'info'} [type]
  */
 function showToast(message, type = 'info') {
   const existing = document.getElementById('__gjc_toast__');
@@ -99,6 +149,8 @@ function showToast(message, type = 'info') {
 
   const toast = document.createElement('div');
   toast.id = '__gjc_toast__';
+  toast.setAttribute('role', 'alert');
+  toast.setAttribute('aria-live', 'assertive');
 
   Object.assign(toast.style, {
     position:     'fixed',
@@ -110,13 +162,14 @@ function showToast(message, type = 'info') {
     padding:      '12px 20px',
     borderRadius: '6px',
     fontSize:     '14px',
-    fontFamily:   'system-ui, sans-serif',
-    maxWidth:     '420px',
+    fontFamily:   'system-ui, -apple-system, sans-serif',
+    maxWidth:     '440px',
     boxShadow:    '0 4px 16px rgba(0,0,0,0.35)',
     lineHeight:   '1.5',
     wordBreak:    'break-word',
     opacity:      '1',
     transition:   'opacity 0.3s ease',
+    userSelect:   'none',
   });
 
   toast.textContent = message;
@@ -125,7 +178,7 @@ function showToast(message, type = 'info') {
   setTimeout(() => {
     toast.style.opacity = '0';
     setTimeout(() => toast.remove(), 320);
-  }, 4000);
+  }, 4500);
 }
 
 // ── Message listener ──────────────────────────────────────────────────────────
@@ -137,7 +190,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       issueKey: extractIssueKey(),
       url:      window.location.href,
     });
-    return false; // synchronous response
+    return false; // synchronous — no need to keep channel open
   }
 
   if (msg.type === 'SHOW_TOAST') {
