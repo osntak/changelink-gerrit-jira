@@ -64,6 +64,34 @@ function sendToTab(tabId, message) {
   });
 }
 
+function injectContentScripts(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        files: ['message_types.js', 'content_script.js'],
+      },
+      () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve();
+        }
+      },
+    );
+  });
+}
+
+async function sendToTabWithRecovery(tabId, message) {
+  try {
+    return await sendToTab(tabId, message);
+  } catch {
+    // Recovery path: receiver is usually missing when content script was not attached.
+    await injectContentScripts(tabId);
+    return sendToTab(tabId, message);
+  }
+}
+
 function getActiveTab() {
   return new Promise((resolve) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -97,7 +125,7 @@ async function getActiveGerritContext() {
   }
 
   try {
-    const context = await sendToTab(tab.id, { type: MSG.EXTRACT_CONTEXT });
+    const context = await sendToTabWithRecovery(tab.id, { type: MSG.EXTRACT_CONTEXT });
     const safeContext = {
       issueKey: isValidIssueKey(context?.issueKey || '') ? context.issueKey : null,
       subject: String(context?.subject || '').trim().slice(0, 500),
