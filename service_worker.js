@@ -128,8 +128,8 @@ async function handleGerritAction(tab) {
   // Sanitise subject: trim whitespace, cap length to prevent oversized comments.
   const safeSubject = String(subject).trim().slice(0, 500) || '(no title)';
 
-  // ── Step 3: load credentials ───────────────────────────────────────────────
-  const { jiraEmail, jiraToken } = await loadCredentials();
+  // ── Step 3: load credentials + template ───────────────────────────────────
+  const { jiraEmail, jiraToken, commentTemplate } = await loadStorageData();
 
   if (!jiraEmail || !jiraToken) {
     toastTab(
@@ -139,10 +139,19 @@ async function handleGerritAction(tab) {
     return;
   }
 
-  // ── Step 4: POST comment ───────────────────────────────────────────────────
+  // ── Step 4: render template → POST comment ────────────────────────────────
+  const template = (commentTemplate || '').trim() || DEFAULT_TEMPLATE;
+  const rendered = renderTemplate(template, {
+    title:  safeSubject,
+    body:   String(info.body  ?? '').trim(),
+    branch: String(info.branch ?? '').trim(),
+    date:   formatDate(new Date()),
+    url,
+  });
+
   let status;
   try {
-    status = await postJiraComment(issueKey, url, safeSubject, jiraEmail, jiraToken);
+    status = await postJiraComment(issueKey, url, rendered, jiraEmail, jiraToken);
   } catch {
     toastTab(tab.id, '네트워크 오류가 발생했습니다. 인터넷 연결을 확인하세요.');
     return;
@@ -158,10 +167,62 @@ async function handleGerritAction(tab) {
 
 // ── Storage ───────────────────────────────────────────────────────────────────
 
-function loadCredentials() {
+function loadStorageData() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['jiraEmail', 'jiraToken'], resolve);
+    chrome.storage.local.get(
+      ['jiraEmail', 'jiraToken', 'commentTemplate'],
+      resolve,
+    );
   });
+}
+
+// ── Comment template ──────────────────────────────────────────────────────────
+
+/**
+ * Default Jira comment template.
+ * Users can override this in the options page.
+ * Supported placeholders: {title} {body} {branch} {date} {url}
+ */
+const DEFAULT_TEMPLATE =
+`{title}
+
+{body}
+
+브랜치: {branch}
+반영 일시: {date}
+Gerrit: {url}`;
+
+/**
+ * Replaces all `{placeholder}` tokens in the template with actual values.
+ * Collapses 3+ consecutive newlines to 2 so an empty {body} doesn't leave
+ * a double blank line in the Jira comment.
+ *
+ * @param {string} template
+ * @param {{ title: string, body: string, branch: string, date: string, url: string }} vars
+ * @returns {string}
+ */
+function renderTemplate(template, vars) {
+  return template
+    .replace(/\{title\}/g,  vars.title  ?? '')
+    .replace(/\{body\}/g,   vars.body   ?? '')
+    .replace(/\{branch\}/g, vars.branch ?? '')
+    .replace(/\{date\}/g,   vars.date   ?? '')
+    .replace(/\{url\}/g,    vars.url    ?? '')
+    .replace(/\n{3,}/g, '\n\n')   // collapse extra blank lines
+    .trim();
+}
+
+/**
+ * Formats a Date to a human-readable Korean locale string, e.g.
+ * "2025-02-23 14:30"
+ *
+ * @param {Date} d
+ * @returns {string}
+ */
+function formatDate(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 // ── Jira API ──────────────────────────────────────────────────────────────────
@@ -171,70 +232,98 @@ function loadCredentials() {
  *
  * Security notes:
  *   - JIRA_BASE is a fixed constant — never derived from user/page input.
- *   - issueKey is validated by isValidIssueKey() before reaching this function.
- *   - The Authorization header and credentials are NEVER logged.
+ *   - issueKey is validated by isValidIssueKey() before reaching here.
+ *   - Authorization header is NEVER logged.
  *   - Only the HTTP status code is returned; the response body is discarded.
  *
- * @param {string} issueKey  e.g. "PROJ-123"
- * @param {string} changeUrl validated Gerrit change URL
- * @param {string} subject   sanitised change title (max 500 chars)
- * @param {string} email     Jira account email
- * @param {string} token     Jira API token
- * @returns {Promise<number>} HTTP status code
+ * @param {string} issueKey    e.g. "PROJ-123"
+ * @param {string} changeUrl   validated Gerrit change URL (used to make links)
+ * @param {string} rendered    fully-rendered template string
+ * @param {string} email       Jira account email
+ * @param {string} token       Jira API token
+ * @returns {Promise<number>}  HTTP status code
  */
-async function postJiraComment(issueKey, changeUrl, subject, email, token) {
+async function postJiraComment(issueKey, changeUrl, rendered, email, token) {
   const apiUrl =
     `${JIRA_BASE}/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`;
 
   const resp = await fetch(apiUrl, {
     method: 'POST',
     headers: {
-      // Authorization header is constructed only here, in the service worker.
       Authorization: `Basic ${btoa(`${email}:${token}`)}`,
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify(buildAdfComment(changeUrl, subject)),
+    body: JSON.stringify(textToAdf(rendered, changeUrl)),
   });
 
   return resp.status;
 }
 
+// ── ADF builder ───────────────────────────────────────────────────────────────
+
 /**
- * Builds an Atlassian Document Format (ADF) comment body.
+ * Converts a plain-text string into an ADF (Atlassian Document Format) doc.
  *
- * Rendered output (Jira Cloud):
- *   [auto:gerrit] Gerrit change: <linked URL>
- *   Title: <subject>
+ * Rules:
+ *   - Double newlines  → paragraph boundaries
+ *   - Single newlines  → hardBreak within a paragraph
+ *   - Any occurrence of `linkUrl` in the text → inline hyperlink
  *
- * @param {string} changeUrl
- * @param {string} subject
- * @returns {object} ADF comment payload
+ * @param {string} text
+ * @param {string} linkUrl  URL to auto-link wherever it appears in the text
+ * @returns {object}        ADF comment payload  { body: { type:'doc', ... } }
  */
-function buildAdfComment(changeUrl, subject) {
-  return {
-    body: {
-      type: 'doc',
-      version: 1,
-      content: [
-        {
-          type: 'paragraph',
-          content: [
-            { type: 'text', text: '[auto:gerrit] Gerrit change: ' },
-            {
-              type: 'text',
-              text: changeUrl,
-              marks: [{ type: 'link', attrs: { href: changeUrl } }],
-            },
-          ],
-        },
-        {
-          type: 'paragraph',
-          content: [{ type: 'text', text: `Title: ${subject}` }],
-        },
-      ],
-    },
-  };
+function textToAdf(text, linkUrl) {
+  const paragraphs = text
+    .split(/\n\n+/)
+    .map(p => buildAdfParagraph(p, linkUrl))
+    .filter(p => p.content.length > 0);
+
+  // Ensure the doc always has at least one paragraph (ADF requirement)
+  if (paragraphs.length === 0) {
+    paragraphs.push({ type: 'paragraph', content: [{ type: 'text', text: '' }] });
+  }
+
+  return { body: { type: 'doc', version: 1, content: paragraphs } };
+}
+
+/**
+ * Builds a single ADF paragraph node from a paragraph string.
+ * Newlines within the paragraph become `hardBreak` nodes.
+ */
+function buildAdfParagraph(paraText, linkUrl) {
+  const nodes = [];
+  const lines = paraText.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0) nodes.push({ type: 'hardBreak' });
+    nodes.push(...inlineNodesForLine(lines[i], linkUrl));
+  }
+
+  return { type: 'paragraph', content: nodes };
+}
+
+/**
+ * Splits a single line of text into ADF inline nodes.
+ * If the line contains `linkUrl`, that substring becomes a clickable link.
+ */
+function inlineNodesForLine(line, linkUrl) {
+  if (!linkUrl || !line.includes(linkUrl)) {
+    return line ? [{ type: 'text', text: line }] : [];
+  }
+
+  const idx = line.indexOf(linkUrl);
+  const nodes = [];
+  if (idx > 0) nodes.push({ type: 'text', text: line.slice(0, idx) });
+  nodes.push({
+    type: 'text',
+    text: linkUrl,
+    marks: [{ type: 'link', attrs: { href: linkUrl } }],
+  });
+  const after = line.slice(idx + linkUrl.length);
+  if (after) nodes.push({ type: 'text', text: after });
+  return nodes;
 }
 
 /**

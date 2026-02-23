@@ -126,6 +126,61 @@
       color: #1565c0;
     }
 
+    textarea {
+      width: 100%;
+      padding: 9px 13px;
+      border: 1px solid #bbb;
+      border-radius: 5px;
+      font-size: 0.88rem;
+      font-family: 'Consolas', 'Menlo', monospace;
+      background: #fff;
+      resize: vertical;
+      min-height: 140px;
+      line-height: 1.6;
+      transition: border-color 0.15s;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #1565c0;
+      box-shadow: 0 0 0 2px rgba(21,101,192,0.15);
+    }
+
+    .placeholder-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      margin-top: 10px;
+    }
+    .placeholder-table th {
+      text-align: left;
+      padding: 5px 8px;
+      background: #f0f4ff;
+      color: #1565c0;
+      font-weight: 700;
+      border-bottom: 1px solid #d0d9f0;
+    }
+    .placeholder-table td {
+      padding: 5px 8px;
+      border-bottom: 1px solid #eee;
+      color: #444;
+    }
+    .placeholder-table td code {
+      background: #f0f4ff;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 0.82rem;
+    }
+
+    #btn-reset {
+      background: #fff;
+      color: #c62828;
+      border: 1px solid #e0e0e0;
+      font-size: 0.82rem;
+      padding: 6px 14px;
+      margin-top: 8px;
+    }
+    #btn-reset:hover { background: #ffebee; border-color: #c62828; }
+
     .security-badge {
       display: inline-block;
       background: #e8f5e9;
@@ -174,6 +229,40 @@
   </div>
 
   <div id="status" role="status" aria-live="polite"></div>
+
+  <div class="section" style="margin-top:32px;">
+    <h2>Jira 댓글 템플릿</h2>
+    <p style="font-size:0.8rem;color:#555;margin:0 0 10px;">
+      아래 플레이스홀더를 자유롭게 조합하세요. 비워두면 기본값이 사용됩니다.
+    </p>
+
+    <table class="placeholder-table">
+      <thead>
+        <tr><th>플레이스홀더</th><th>치환 내용</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>{title}</code></td><td>커밋 제목 (첫 번째 줄)</td></tr>
+        <tr><td><code>{body}</code></td><td>커밋 메시지 본문 (제목·jira 라인 제외)</td></tr>
+        <tr><td><code>{branch}</code></td><td>타겟 브랜치명</td></tr>
+        <tr><td><code>{date}</code></td><td>반영 일시 (YYYY-MM-DD HH:MM)</td></tr>
+        <tr><td><code>{url}</code></td><td>Gerrit change 링크 (클릭 가능)</td></tr>
+      </tbody>
+    </table>
+
+    <label for="template" style="margin-top:14px;">템플릿</label>
+    <textarea
+      id="template"
+      spellcheck="false"
+      placeholder="{title}
+
+{body}
+
+브랜치: {branch}
+반영 일시: {date}
+Gerrit: {url}"
+    ></textarea>
+    <button id="btn-reset">기본값으로 초기화</button>
+  </div>
 
   <div class="section">
     <h2>도움말</h2>

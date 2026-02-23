@@ -9,11 +9,23 @@
 
 'use strict';
 
-const emailEl  = /** @type {HTMLInputElement} */ (document.getElementById('email'));
-const tokenEl  = /** @type {HTMLInputElement} */ (document.getElementById('token'));
-const statusEl = document.getElementById('status');
-const btnSave  = document.getElementById('btn-save');
-const btnTest  = document.getElementById('btn-test');
+const emailEl    = /** @type {HTMLInputElement}  */ (document.getElementById('email'));
+const tokenEl    = /** @type {HTMLInputElement}  */ (document.getElementById('token'));
+const templateEl = /** @type {HTMLTextAreaElement} */ (document.getElementById('template'));
+const statusEl   = document.getElementById('status');
+const btnSave    = document.getElementById('btn-save');
+const btnTest    = document.getElementById('btn-test');
+const btnReset   = document.getElementById('btn-reset');
+
+// Must match DEFAULT_TEMPLATE in service_worker.js
+const DEFAULT_TEMPLATE =
+`{title}
+
+{body}
+
+브랜치: {branch}
+반영 일시: {date}
+Gerrit: {url}`;
 
 // ── Status helper ─────────────────────────────────────────────────────────────
 
@@ -32,10 +44,15 @@ function setStatus(msg, cls, autoClearMs) {
 
 // ── Load saved values on page open ───────────────────────────────────────────
 
-chrome.storage.local.get(['jiraEmail', 'jiraToken'], ({ jiraEmail, jiraToken }) => {
-  if (jiraEmail) emailEl.value = jiraEmail;
-  if (jiraToken) tokenEl.value = jiraToken;
-});
+chrome.storage.local.get(
+  ['jiraEmail', 'jiraToken', 'commentTemplate'],
+  ({ jiraEmail, jiraToken, commentTemplate }) => {
+    if (jiraEmail) emailEl.value = jiraEmail;
+    if (jiraToken) tokenEl.value = jiraToken;
+    // Show saved template or leave textarea empty (placeholder shows the default)
+    templateEl.value = commentTemplate ?? '';
+  },
+);
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 
@@ -53,14 +70,27 @@ btnSave.addEventListener('click', () => {
     return;
   }
 
+  // commentTemplate: empty string means "use default" (service worker handles this)
+  const templateVal = templateEl.value; // preserve as-is, including empty
+
   // Persisted to local storage only — no sync, no logging.
-  chrome.storage.local.set({ jiraEmail: email, jiraToken: token }, () => {
-    if (chrome.runtime.lastError) {
-      setStatus('저장 중 오류가 발생했습니다.', 'err');
-      return;
-    }
-    setStatus('저장되었습니다.', 'ok', 3000);
-  });
+  chrome.storage.local.set(
+    { jiraEmail: email, jiraToken: token, commentTemplate: templateVal },
+    () => {
+      if (chrome.runtime.lastError) {
+        setStatus('저장 중 오류가 발생했습니다.', 'err');
+        return;
+      }
+      setStatus('저장되었습니다.', 'ok', 3000);
+    },
+  );
+});
+
+// ── Reset template ─────────────────────────────────────────────────────────────
+
+btnReset.addEventListener('click', () => {
+  templateEl.value = DEFAULT_TEMPLATE;
+  setStatus('기본 템플릿으로 초기화됐습니다. 저장 버튼을 눌러 적용하세요.', 'inf', 4000);
 });
 
 // ── Connection test ───────────────────────────────────────────────────────────
