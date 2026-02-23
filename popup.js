@@ -35,20 +35,11 @@ function isGerritChangeUrl(url) {
 }
 
 function syncActionButtons() {
-  if (!authConfigured) {
-    btnRefresh.disabled = true;
-    btnLink.disabled = true;
-    btnComment.disabled = true;
-    btnOpenIssue.disabled = true;
-    issueKeyInputEl.disabled = true;
-    return;
-  }
-
   issueKeyInputEl.disabled = false;
   btnRefresh.disabled = false;
   const key = getEffectiveIssueKey();
-  btnLink.disabled = !key;
-  btnComment.disabled = !key;
+  btnLink.disabled = !authConfigured || !key;
+  btnComment.disabled = !authConfigured || !key;
   btnOpenIssue.disabled = !key;
 }
 
@@ -190,7 +181,7 @@ async function setFabEnabled(enabled) {
 
 async function fetchIssue() {
   if (!authConfigured) {
-    setStatus('Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.', 'warn');
+    setStatus('Jira 인증이 없어 이슈 조회는 비활성화되었습니다.\n컨텍스트 탐색은 계속 사용할 수 있습니다.', 'warn');
     return;
   }
   const issueKey = getEffectiveIssueKey();
@@ -224,7 +215,7 @@ async function fetchIssue() {
 
 async function addRemoteLink() {
   if (!authConfigured) {
-    setStatus('Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.', 'warn');
+    setStatus('Jira 인증이 없어 웹링크 추가는 비활성화되었습니다.', 'warn');
     return;
   }
   const issueKey = getEffectiveIssueKey();
@@ -251,7 +242,7 @@ async function addRemoteLink() {
 
 async function addComment() {
   if (!authConfigured) {
-    setStatus('Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.', 'warn');
+    setStatus('Jira 인증이 없어 코멘트 생성은 비활성화되었습니다.', 'warn');
     return;
   }
   const issueKey = getEffectiveIssueKey();
@@ -277,10 +268,6 @@ async function addComment() {
 }
 
 function openIssuePage() {
-  if (!authConfigured) {
-    setStatus('Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.', 'warn');
-    return;
-  }
   const issueKey = getEffectiveIssueKey();
   if (!issueKey) {
     setStatus('이슈키를 먼저 확인하세요.', 'warn');
@@ -293,7 +280,11 @@ function openIssuePage() {
 btnRefresh.addEventListener('click', async () => {
   setActionBusy(true);
   const ready = await loadContext();
-  if (ready) await fetchIssue();
+  if (ready && authConfigured) {
+    await fetchIssue();
+  } else if (ready) {
+    setStatus('컨텍스트 새로고침 완료. Jira 인증 후 이슈 조회를 사용할 수 있습니다.', 'warn');
+  }
   setActionBusy(false);
 });
 
@@ -319,15 +310,12 @@ btnOpenIssue.addEventListener('click', openIssuePage);
   authConfigured = true;
   syncActionButtons();
   await loadAuthState();
-  if (!authConfigured) {
-    setStatus('Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.', 'warn');
-    await loadFabSetting();
-    return;
-  }
   await loadFabSetting();
   const ready = await loadContext();
-  if (ready && isGerritChangeUrl(currentContext?.gerritUrl || '') && getEffectiveIssueKey()) {
+  if (ready && authConfigured && isGerritChangeUrl(currentContext?.gerritUrl || '') && getEffectiveIssueKey()) {
     await fetchIssue();
+  } else if (ready && !authConfigured) {
+    setStatus('Jira 인증이 없어 API 버튼은 비활성화되었습니다.\nSubject/Issue Key 탐색은 계속 사용할 수 있습니다.', 'warn');
   } else if (ready) {
     setStatus('Gerrit change URL에서 자동 조회가 실행됩니다.', 'warn');
   }
