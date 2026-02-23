@@ -360,12 +360,28 @@ function sendRuntimeMessage(msg) {
 
 let fabDocClickHandler = null;
 
+function setFabMenuItemsState(menu, isOpen) {
+  const items = Array.from(menu.children);
+  items.forEach((item, idx) => {
+    item.style.opacity = isOpen ? '1' : '0';
+    item.style.transform = isOpen ? 'translateY(0) scale(1)' : 'translateY(6px) scale(0.94)';
+    item.style.transitionDelay = isOpen ? `${idx * 22}ms` : '0ms';
+  });
+}
+
 function closeFabMenu() {
   const menu = document.getElementById('gj-fab-menu');
   if (!menu) return;
   menu.style.opacity = '0';
-  menu.style.transform = 'translateY(8px)';
+  menu.style.transform = 'translateY(6px)';
   menu.style.pointerEvents = 'none';
+  setFabMenuItemsState(menu, false);
+
+  const mainButton = document.getElementById('gj-fab-main');
+  if (mainButton) {
+    mainButton.style.transform = 'translateY(0) scale(1)';
+    mainButton.style.boxShadow = '0 6px 18px rgba(0,0,0,0.35)';
+  }
 }
 
 function openFabMenu() {
@@ -374,6 +390,13 @@ function openFabMenu() {
   menu.style.opacity = '1';
   menu.style.transform = 'translateY(0)';
   menu.style.pointerEvents = 'auto';
+  setFabMenuItemsState(menu, true);
+
+  const mainButton = document.getElementById('gj-fab-main');
+  if (mainButton) {
+    mainButton.style.transform = 'translateY(-1px) scale(1.03)';
+    mainButton.style.boxShadow = '0 10px 24px rgba(0,0,0,0.32)';
+  }
 }
 
 function isFabMenuOpen() {
@@ -515,6 +538,9 @@ function buildFabActionButton({ id, icon, title, onClick }) {
     fontSize: '19px',
     cursor: 'pointer',
     boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+    opacity: '0',
+    transform: 'translateY(6px) scale(0.94)',
+    transition: 'opacity 0.16s ease, transform 0.18s ease',
   });
 
   btn.addEventListener('click', async (e) => {
@@ -548,9 +574,9 @@ function renderFab() {
     display: 'grid',
     gap: '8px',
     opacity: '0',
-    transform: 'translateY(8px)',
+    transform: 'translateY(6px)',
     pointerEvents: 'none',
-    transition: 'all 0.16s ease',
+    transition: 'opacity 0.16s ease, transform 0.18s ease',
   });
 
   menu.appendChild(buildFabActionButton({
@@ -591,6 +617,7 @@ function renderFab() {
     fontWeight: '700',
     cursor: 'pointer',
     boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+    transition: 'transform 0.16s ease, box-shadow 0.16s ease',
   });
 
   mainButton.addEventListener('click', (e) => {
