@@ -119,6 +119,45 @@ function extractIssueKey() {
   const fromBody = extractIssueKeyFromText(pageText);
   if (fromBody) return fromBody;
 
+  // 4) fallback: gather text inside open shadow roots explicitly
+  const shadowTextChunks = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (el.shadowRoot) {
+      const txt = (el.shadowRoot.textContent || '').trim();
+      if (txt) shadowTextChunks.push(txt);
+    }
+  }
+  if (shadowTextChunks.length > 0) {
+    const fromShadowText = extractIssueKeyFromText(shadowTextChunks.join('\n'));
+    if (fromShadowText) return fromShadowText;
+  }
+
+  // 5) broad scan across common Gerrit nodes inside open shadow roots
+  const broadSelectors = [
+    '#subject',
+    '.header-title',
+    '.headerSubject',
+    '.change-title',
+    'h1',
+    'h2',
+    '#commitMessage',
+    '#commitMessageEditor',
+    '.commitMessage',
+    'gr-editable-content',
+    'gr-formatted-text',
+    'gr-change-header',
+    'gr-change-view',
+  ];
+
+  for (const sel of broadSelectors) {
+    const els = queryShadowAll(document, sel);
+    for (const el of els) {
+      const text = (el.textContent || '').trim();
+      const key = extractIssueKeyFromText(text);
+      if (key) return key;
+    }
+  }
+
   return null;
 }
 

@@ -14,6 +14,7 @@ const btnLink = document.getElementById('btn-link');
 const btnComment = document.getElementById('btn-comment');
 const fabEnabledEl = document.getElementById('fab-enabled');
 const btnOptions = document.getElementById('btn-options');
+const issueKeyInputEl = document.getElementById('issue-key-input');
 
 let currentContext = null;
 
@@ -22,10 +23,20 @@ function setStatus(message, cls) {
   statusEl.className = `status ${cls || ''}`.trim();
 }
 
+function isGerritChangeUrl(url) {
+  try {
+    const u = new URL(String(url || ''));
+    return /\/c\/.+\/\+\/\d+/.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function syncActionButtons() {
   btnRefresh.disabled = false;
-  btnLink.disabled = !currentContext?.issueKey;
-  btnComment.disabled = !currentContext?.issueKey;
+  const key = getEffectiveIssueKey();
+  btnLink.disabled = !key;
+  btnComment.disabled = !key;
 }
 
 function setActionBusy(isBusy) {
@@ -42,7 +53,26 @@ function renderContext(context) {
   currentContext = context;
   issueKeyEl.textContent = context.issueKey || '-';
   subjectEl.textContent = context.subject || '(제목 없음)';
+  if (!issueKeyInputEl.value && context.issueKey) {
+    issueKeyInputEl.value = context.issueKey;
+  }
   syncActionButtons();
+}
+
+function normalizeIssueKey(key) {
+  return String(key || '').trim().toUpperCase();
+}
+
+function isValidIssueKey(key) {
+  return /^[A-Z][A-Z0-9]+-\d+$/.test(key);
+}
+
+function getEffectiveIssueKey() {
+  const manual = normalizeIssueKey(issueKeyInputEl.value);
+  if (isValidIssueKey(manual)) return manual;
+  const detected = normalizeIssueKey(currentContext?.issueKey);
+  if (isValidIssueKey(detected)) return detected;
+  return '';
 }
 
 function loadFabSetting() {
@@ -137,7 +167,8 @@ async function setFabEnabled(enabled) {
 }
 
 async function fetchIssue() {
-  if (!currentContext?.issueKey) {
+  const issueKey = getEffectiveIssueKey();
+  if (!issueKey) {
     setStatus('이슈키를 먼저 확인하세요.', 'warn');
     return;
   }
@@ -147,7 +178,7 @@ async function fetchIssue() {
   try {
     const resp = await sendMessage({
       type: MSG.POPUP_GET_ISSUE,
-      issueKey: currentContext.issueKey,
+      issueKey,
     });
 
     if (!resp?.ok) {
@@ -157,7 +188,7 @@ async function fetchIssue() {
     }
 
     renderIssueCard(resp.issue);
-    setStatus(`이슈 조회 완료: ${currentContext.issueKey}`, 'ok');
+    setStatus(`이슈 조회 완료: ${issueKey}`, 'ok');
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
   } finally {
@@ -166,7 +197,8 @@ async function fetchIssue() {
 }
 
 async function addRemoteLink() {
-  if (!currentContext?.issueKey) {
+  const issueKey = getEffectiveIssueKey();
+  if (!issueKey) {
     setStatus('이슈키를 먼저 확인하세요.', 'warn');
     return;
   }
@@ -174,12 +206,12 @@ async function addRemoteLink() {
   setActionBusy(true);
   setStatus('웹링크 추가 중...', '');
   try {
-    const resp = await sendMessage({ type: MSG.POPUP_ADD_REMOTE_LINK });
+    const resp = await sendMessage({ type: MSG.POPUP_ADD_REMOTE_LINK, issueKeyOverride: issueKey });
     if (!resp?.ok) {
       setStatus(resp?.message || '웹링크 추가에 실패했습니다.', 'err');
       return;
     }
-    setStatus(`웹링크 추가 완료: ${currentContext.issueKey}`, 'ok');
+    setStatus(`웹링크 추가 완료: ${issueKey}`, 'ok');
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
   } finally {
@@ -188,7 +220,8 @@ async function addRemoteLink() {
 }
 
 async function addComment() {
-  if (!currentContext?.issueKey) {
+  const issueKey = getEffectiveIssueKey();
+  if (!issueKey) {
     setStatus('이슈키를 먼저 확인하세요.', 'warn');
     return;
   }
@@ -196,12 +229,12 @@ async function addComment() {
   setActionBusy(true);
   setStatus('코멘트 생성 중...', '');
   try {
-    const resp = await sendMessage({ type: MSG.POPUP_ADD_COMMENT });
+    const resp = await sendMessage({ type: MSG.POPUP_ADD_COMMENT, issueKeyOverride: issueKey });
     if (!resp?.ok) {
       setStatus(resp?.message || '코멘트 생성에 실패했습니다.', 'err');
       return;
     }
-    setStatus(`코멘트 생성 완료: ${currentContext.issueKey}`, 'ok');
+    setStatus(`코멘트 생성 완료: ${issueKey}`, 'ok');
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
   } finally {
@@ -221,6 +254,13 @@ btnComment.addEventListener('click', addComment);
 fabEnabledEl.addEventListener('change', () => {
   setFabEnabled(fabEnabledEl.checked);
 });
+issueKeyInputEl.addEventListener('input', () => {
+  const normalized = normalizeIssueKey(issueKeyInputEl.value);
+  if (normalized !== issueKeyInputEl.value) {
+    issueKeyInputEl.value = normalized;
+  }
+  syncActionButtons();
+});
 btnOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
@@ -230,7 +270,9 @@ btnOptions.addEventListener('click', () => {
   syncActionButtons();
   await loadFabSetting();
   const ready = await loadContext();
-  if (ready) {
+  if (ready && isGerritChangeUrl(currentContext?.gerritUrl || '')) {
     await fetchIssue();
+  } else if (ready) {
+    setStatus('Gerrit change URL에서 자동 조회가 실행됩니다.', 'warn');
   }
 })();

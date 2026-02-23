@@ -404,14 +404,17 @@ async function handlePopupGetIssue(issueKey) {
   }
 }
 
-async function handlePopupAddRemoteLink() {
+async function handlePopupAddRemoteLink(issueKeyOverride) {
   const contextResp = await getActiveGerritContext();
   if (!contextResp.ok) {
     return { ok: false, message: contextResp.message };
   }
 
   const context = contextResp.context;
-  if (!context.issueKey) {
+  const overrideKey = String(issueKeyOverride || '').trim().toUpperCase();
+  const issueKey = isValidIssueKey(overrideKey) ? overrideKey : context.issueKey;
+
+  if (!issueKey) {
     return {
       ok: false,
       message: 'PROJ-123 같은 이슈키가 필요합니다. 제목 또는 커밋 메시지에 jira: KEY를 추가하세요.',
@@ -425,8 +428,8 @@ async function handlePopupAddRemoteLink() {
   }
 
   try {
-    await jiraClient.addRemoteLink(context.issueKey, buildRemoteLinkPayload(context));
-    return { ok: true, issueKey: context.issueKey };
+    await jiraClient.addRemoteLink(issueKey, buildRemoteLinkPayload(context));
+    return { ok: true, issueKey };
   } catch (err) {
     return {
       ok: false,
@@ -435,14 +438,17 @@ async function handlePopupAddRemoteLink() {
   }
 }
 
-async function handlePopupAddComment() {
+async function handlePopupAddComment(issueKeyOverride) {
   const contextResp = await getActiveGerritContext();
   if (!contextResp.ok) {
     return { ok: false, message: contextResp.message };
   }
 
   const context = contextResp.context;
-  if (!context.issueKey) {
+  const overrideKey = String(issueKeyOverride || '').trim().toUpperCase();
+  const issueKey = isValidIssueKey(overrideKey) ? overrideKey : context.issueKey;
+
+  if (!issueKey) {
     return {
       ok: false,
       message: 'PROJ-123 같은 이슈키가 필요합니다. 제목 또는 커밋 메시지에 jira: KEY를 추가하세요.',
@@ -457,8 +463,8 @@ async function handlePopupAddComment() {
 
   try {
     const adfDoc = await buildCommentAdf(context);
-    await jiraClient.addComment(context.issueKey, adfDoc);
-    return { ok: true, issueKey: context.issueKey };
+    await jiraClient.addComment(issueKey, adfDoc);
+    return { ok: true, issueKey };
   } catch (err) {
     return {
       ok: false,
@@ -508,12 +514,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === MSG.POPUP_ADD_REMOTE_LINK) {
-    handlePopupAddRemoteLink().then(sendResponse);
+    handlePopupAddRemoteLink(msg.issueKeyOverride).then(sendResponse);
     return true;
   }
 
   if (msg.type === MSG.POPUP_ADD_COMMENT) {
-    handlePopupAddComment().then(sendResponse);
+    handlePopupAddComment(msg.issueKeyOverride).then(sendResponse);
     return true;
   }
 
