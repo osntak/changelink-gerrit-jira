@@ -81,16 +81,26 @@ btnSave.addEventListener('click', () => {
   }
 
   // Persisted to local storage only — no sync, no logging.
-  chrome.storage.local.set(
-    payload,
-    () => {
-      if (chrome.runtime.lastError) {
-        setStatus('저장 중 오류가 발생했습니다.', 'err');
-        return;
-      }
-      setStatus('저장되었습니다.', 'ok', 3000);
-    },
-  );
+  chrome.storage.local.set(payload, () => {
+    if (chrome.runtime.lastError) {
+      setStatus('저장 중 오류가 발생했습니다.', 'err');
+      return;
+    }
+
+    // When fields are empty, clear previously saved credentials.
+    if (!email && !token) {
+      chrome.storage.local.remove(['jiraEmail', 'jiraToken'], () => {
+        if (chrome.runtime.lastError) {
+          setStatus('저장 중 오류가 발생했습니다.', 'err');
+          return;
+        }
+        setStatus('저장되었습니다.', 'ok', 3000);
+      });
+      return;
+    }
+
+    setStatus('저장되었습니다.', 'ok', 3000);
+  });
 });
 
 // ── Reset template ─────────────────────────────────────────────────────────────
