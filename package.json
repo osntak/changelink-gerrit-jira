@@ -1,0 +1,10 @@
+{
+  "name": "gerrit-jira-automation",
+  "version": "1.0.0",
+  "description": "Gerrit change 페이지에서 툴바 버튼 한 번으로 Jira 이슈에 코멘트를 추가하는 Chrome 익스텐션",
+  "private": true,
+  "scripts": {
+    "build": "npm run zip",
+    "zip": "node -e \"const {execSync}=require('child_process');const v=require('./manifest.json').version;const out='gerrit-jira-automation-v'+v+'.zip';execSync('zip -r '+out+' manifest.json content_script.js service_worker.js options.html options.js');console.log('Created: '+out);\""
+  }
+}
