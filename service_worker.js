@@ -14,6 +14,20 @@ const GERRIT_ORIGINS = [
 /** Single allowed Jira base URL. Never interpolated from user/page input. */
 const JIRA_BASE = 'https://yourcompany.atlassian.net';
 
+/**
+ * Default Jira comment template (used when none is saved in options).
+ * Supported placeholders: {title} {body} {branch} {change_num} {project}
+ *                         {owner} {date} {url}
+ */
+const DEFAULT_TEMPLATE =
+`{title}
+
+{body}
+
+브랜치: {branch}
+반영 일시: {date}
+Gerrit: {url}`;
+
 // ── Validation helpers ────────────────────────────────────────────────────────
 
 /** Returns true when the tab URL belongs to the allowed Gerrit instance. */
@@ -182,26 +196,13 @@ function loadStorageData() {
 // ── Comment template ──────────────────────────────────────────────────────────
 
 /**
- * Default Jira comment template.
- * Users can override this in the options page.
- * Supported placeholders: {title} {body} {branch} {date} {url}
- */
-const DEFAULT_TEMPLATE =
-`{title}
-
-{body}
-
-브랜치: {branch}
-반영 일시: {date}
-Gerrit: {url}`;
-
-/**
  * Replaces all `{placeholder}` tokens in the template with actual values.
  * Collapses 3+ consecutive newlines to 2 so an empty {body} doesn't leave
  * a double blank line in the Jira comment.
  *
  * @param {string} template
- * @param {{ title: string, body: string, branch: string, date: string, url: string }} vars
+ * @param {{ title: string, body: string, branch: string, changeNum: string,
+ *           project: string, owner: string, date: string, url: string }} vars
  * @returns {string}
  */
 function renderTemplate(template, vars) {
