@@ -7,201 +7,262 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; }
 
+    :root {
+      --ink-900: #14213d;
+      --ink-700: #2f3a54;
+      --ink-500: #5f6b87;
+      --line: #d7dce8;
+      --surface: #ffffff;
+      --surface-soft: #f7f9ff;
+      --brand: #0f6ad8;
+      --brand-strong: #0a4ea5;
+      --ok-bg: #ebfff2;
+      --ok-fg: #137a3d;
+      --err-bg: #fff0f0;
+      --err-fg: #be1f2f;
+      --info-bg: #edf4ff;
+      --info-fg: #0e4f9f;
+    }
+
     body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      max-width: 520px;
-      margin: 48px auto;
-      padding: 0 24px 48px;
-      color: #1a1a1a;
-      background: #f8f9fa;
+      font-family: 'SUIT', 'Pretendard', 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif;
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 40px 18px 56px;
+      color: var(--ink-900);
+      background:
+        radial-gradient(1100px 620px at 6% -8%, #d7e8ff 0, rgba(215, 232, 255, 0.16) 42%, transparent 70%),
+        radial-gradient(1200px 760px at 100% -20%, #ffe8cd 0, rgba(255, 232, 205, 0.14) 36%, transparent 72%),
+        linear-gradient(180deg, #f9fbff 0%, #f2f5fd 100%);
+    }
+
+    .page-shell {
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(215, 220, 232, 0.8);
+      border-radius: 22px;
+      backdrop-filter: blur(2px);
+      box-shadow: 0 22px 48px rgba(16, 29, 58, 0.08);
+      padding: 24px;
     }
 
     h1 {
-      font-size: 1.35rem;
+      font-size: 1.52rem;
       font-weight: 700;
-      color: #1565c0;
-      border-bottom: 2px solid #1565c0;
-      padding-bottom: 10px;
-      margin-bottom: 28px;
+      color: var(--ink-900);
+      margin: 0;
+      letter-spacing: -0.01em;
+    }
+
+    .subtitle {
+      margin: 8px 0 24px;
+      font-size: 0.9rem;
+      color: var(--ink-500);
+      line-height: 1.65;
     }
 
     label {
       display: block;
-      margin: 20px 0 5px;
+      margin: 20px 0 6px;
       font-weight: 600;
-      font-size: 0.88rem;
-      color: #333;
+      font-size: 0.86rem;
+      color: var(--ink-700);
+      letter-spacing: 0.01em;
     }
 
     input[type="email"],
     input[type="password"] {
       width: 100%;
-      padding: 9px 13px;
-      border: 1px solid #bbb;
-      border-radius: 5px;
-      font-size: 0.92rem;
-      background: #fff;
-      transition: border-color 0.15s;
+      padding: 11px 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      font-size: 0.9rem;
+      background: var(--surface);
+      color: var(--ink-900);
+      transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
     }
 
     input[type="email"]:focus,
     input[type="password"]:focus {
       outline: none;
-      border-color: #1565c0;
-      box-shadow: 0 0 0 2px rgba(21,101,192,0.15);
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(15, 106, 216, 0.14);
+      transform: translateY(-1px);
     }
 
     .field-note {
-      font-size: 0.76rem;
-      color: #666;
-      margin-top: 5px;
+      font-size: 0.77rem;
+      color: var(--ink-500);
+      margin-top: 6px;
     }
 
     .btn-row {
       display: flex;
       gap: 12px;
       margin-top: 24px;
+      flex-wrap: wrap;
     }
 
     button {
-      padding: 9px 22px;
+      padding: 10px 18px;
       border: none;
-      border-radius: 5px;
-      font-size: 0.9rem;
+      border-radius: 11px;
+      font-size: 0.86rem;
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.15s;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
     }
 
     #btn-save {
-      background: #1565c0;
+      background: linear-gradient(135deg, #1a79ea 0%, var(--brand) 60%, #0f62cb 100%);
       color: #fff;
+      box-shadow: 0 9px 18px rgba(15, 106, 216, 0.25);
     }
-    #btn-save:hover { background: #0d47a1; }
+    #btn-save:hover {
+      background: linear-gradient(135deg, #1582ff 0%, #0f6ad8 55%, #0d57b8 100%);
+      box-shadow: 0 11px 20px rgba(15, 106, 216, 0.31);
+    }
 
     #btn-test {
-      background: #e0e0e0;
-      color: #333;
+      background: #eff3fb;
+      color: var(--ink-700);
+      border: 1px solid #d9e1f1;
     }
-    #btn-test:hover { background: #bdbdbd; }
+    #btn-test:hover { background: #e7eefc; }
     #btn-test:disabled {
       opacity: 0.55;
       cursor: not-allowed;
+      transform: none;
     }
 
     #status {
       margin-top: 16px;
       min-height: 22px;
-      font-size: 0.86rem;
-      padding: 7px 12px;
-      border-radius: 5px;
+      font-size: 0.83rem;
+      padding: 9px 12px;
+      border-radius: 10px;
       line-height: 1.5;
     }
     #status:empty { padding: 0; }
-    #status.ok  { background: #e8f5e9; color: #2e7d32; }
-    #status.err { background: #ffebee; color: #c62828; }
-    #status.inf { background: #e3f2fd; color: #1565c0; }
+    #status.ok  { background: var(--ok-bg); color: var(--ok-fg); }
+    #status.err { background: var(--err-bg); color: var(--err-fg); }
+    #status.inf { background: var(--info-bg); color: var(--info-fg); }
 
     .section {
-      background: #fff;
-      border: 1px solid #e0e0e0;
-      border-radius: 7px;
-      padding: 18px 20px;
-      margin-top: 32px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+      margin-top: 20px;
+      box-shadow: 0 10px 24px rgba(23, 40, 70, 0.06);
     }
     .section h2 {
-      font-size: 0.9rem;
+      font-size: 0.95rem;
       font-weight: 700;
       margin: 0 0 10px;
-      color: #444;
+      color: var(--ink-900);
+      letter-spacing: 0.01em;
     }
     .section ul {
       margin: 0;
       padding-left: 20px;
-      font-size: 0.81rem;
-      color: #555;
-      line-height: 1.9;
+      font-size: 0.82rem;
+      color: var(--ink-700);
+      line-height: 1.8;
     }
     .section a {
-      color: #1565c0;
+      color: var(--brand-strong);
     }
 
     textarea {
       width: 100%;
-      padding: 9px 13px;
-      border: 1px solid #bbb;
-      border-radius: 5px;
+      padding: 11px 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
       font-size: 0.88rem;
       font-family: 'Consolas', 'Menlo', monospace;
-      background: #fff;
+      background: var(--surface);
+      color: var(--ink-900);
       resize: vertical;
       min-height: 140px;
       line-height: 1.6;
-      transition: border-color 0.15s;
+      transition: border-color 0.15s, box-shadow 0.15s;
     }
     textarea:focus {
       outline: none;
-      border-color: #1565c0;
-      box-shadow: 0 0 0 2px rgba(21,101,192,0.15);
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(15, 106, 216, 0.14);
     }
 
     .placeholder-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.8rem;
+      font-size: 0.79rem;
       margin-top: 10px;
     }
     .placeholder-table th {
       text-align: left;
-      padding: 5px 8px;
-      background: #f0f4ff;
-      color: #1565c0;
+      padding: 7px 8px;
+      background: var(--surface-soft);
+      color: var(--brand-strong);
       font-weight: 700;
-      border-bottom: 1px solid #d0d9f0;
+      border-bottom: 1px solid #d7e2f7;
     }
     .placeholder-table td {
-      padding: 5px 8px;
-      border-bottom: 1px solid #eee;
-      color: #444;
+      padding: 7px 8px;
+      border-bottom: 1px solid #eef1f8;
+      color: var(--ink-700);
     }
     .placeholder-table td code {
-      background: #f0f4ff;
+      background: #eff4ff;
       padding: 1px 5px;
-      border-radius: 3px;
+      border-radius: 4px;
       font-size: 0.82rem;
     }
 
     #btn-reset {
-      background: #fff;
-      color: #c62828;
-      border: 1px solid #e0e0e0;
+      background: #fff6f6;
+      color: #bc2630;
+      border: 1px solid #f0c9cf;
       font-size: 0.82rem;
-      font-weight: 500;
+      font-weight: 600;
       padding: 6px 14px;
       margin-top: 8px;
       display: block;
     }
-    #btn-reset:hover { background: #ffebee; border-color: #c62828; }
+    #btn-reset:hover { background: #ffeef0; border-color: #df9ea7; }
 
-    .security-badge {
-      display: inline-block;
-      background: #e8f5e9;
-      color: #2e7d32;
-      font-size: 0.72rem;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 20px;
-      margin-left: 8px;
-      vertical-align: middle;
-      letter-spacing: 0.02em;
+    @media (max-width: 640px) {
+      body {
+        padding: 16px 10px 28px;
+      }
+
+      .page-shell {
+        border-radius: 16px;
+        padding: 16px;
+      }
+
+      h1 {
+        font-size: 1.28rem;
+      }
+
+      .section {
+        padding: 14px;
+      }
+
+      .placeholder-table {
+        font-size: 0.74rem;
+      }
     }
   </style>
 </head>
 <body>
-  <h1>
-    Gerrit → Jira Comment 옵션
-    <span class="security-badge">LOCAL ONLY</span>
-  </h1>
+  <main class="page-shell">
+    <h1>Gerrit → Jira Comment 옵션</h1>
+    <p class="subtitle">Jira 연결 정보와 댓글 템플릿을 설정합니다.</p>
 
   <label for="email">Jira 이메일</label>
   <input
@@ -221,8 +282,7 @@
     spellcheck="false"
   >
   <div class="field-note">
-    토큰은 이 기기의 로컬 스토리지에만 저장됩니다 (chrome.storage.local).
-    클라우드 동기화(sync)는 사용하지 않습니다.
+    API 토큰은 Atlassian 계정에서 발급한 값을 사용하세요.
   </div>
 
   <div class="btn-row">
@@ -295,6 +355,7 @@ Gerrit: {url}"
       </li>
     </ul>
   </div>
+  </main>
 
   <script src="message_types.js"></script>
   <script src="options.js"></script>
