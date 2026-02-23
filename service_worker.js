@@ -142,10 +142,13 @@ async function handleGerritAction(tab) {
   // ── Step 4: render template → POST comment ────────────────────────────────
   const template = (commentTemplate || '').trim() || DEFAULT_TEMPLATE;
   const rendered = renderTemplate(template, {
-    title:  safeSubject,
-    body:   String(info.body  ?? '').trim(),
-    branch: String(info.branch ?? '').trim(),
-    date:   formatDate(new Date()),
+    title:     safeSubject,
+    body:      String(info.body      ?? '').trim(),
+    branch:    String(info.branch    ?? '').trim(),
+    changeNum: String(info.changeNum ?? '').trim(),
+    project:   String(info.project   ?? '').trim(),
+    owner:     String(info.owner     ?? '').trim(),
+    date:      formatDate(new Date()),
     url,
   });
 
@@ -203,12 +206,15 @@ Gerrit: {url}`;
  */
 function renderTemplate(template, vars) {
   return template
-    .replace(/\{title\}/g,  vars.title  ?? '')
-    .replace(/\{body\}/g,   vars.body   ?? '')
-    .replace(/\{branch\}/g, vars.branch ?? '')
-    .replace(/\{date\}/g,   vars.date   ?? '')
-    .replace(/\{url\}/g,    vars.url    ?? '')
-    .replace(/\n{3,}/g, '\n\n')   // collapse extra blank lines
+    .replace(/\{title\}/g,      vars.title     ?? '')
+    .replace(/\{body\}/g,       vars.body      ?? '')
+    .replace(/\{branch\}/g,     vars.branch    ?? '')
+    .replace(/\{change_num\}/g, vars.changeNum ?? '')
+    .replace(/\{project\}/g,    vars.project   ?? '')
+    .replace(/\{owner\}/g,      vars.owner     ?? '')
+    .replace(/\{date\}/g,       vars.date      ?? '')
+    .replace(/\{url\}/g,        vars.url       ?? '')
+    .replace(/\n{3,}/g, '\n\n')   // collapse extra blank lines from empty vars
     .trim();
 }
 

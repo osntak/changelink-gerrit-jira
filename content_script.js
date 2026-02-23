@@ -181,6 +181,29 @@ function showToast(message, type = 'info') {
   }, 4500);
 }
 
+// ── URL-based extraction (highly reliable) ───────────────────────────────────
+
+/**
+ * Extracts the numeric Gerrit change number from the current URL.
+ * URL pattern: /c/{project}/+/{changeNum}[/...]
+ * Returns empty string if the pattern does not match.
+ */
+function extractChangeNum() {
+  const m = window.location.pathname.match(/\/c\/.+\/\+\/(\d+)/);
+  return m ? m[1] : '';
+}
+
+/**
+ * Extracts the Gerrit project (repository) path from the current URL.
+ * URL pattern: /c/{project}/+/{changeNum}
+ * e.g. "/c/platform/myapp/+/12345" → "platform/myapp"
+ * Returns empty string if the pattern does not match.
+ */
+function extractProject() {
+  const m = window.location.pathname.match(/\/c\/(.+?)\/\+\/\d+/);
+  return m ? m[1] : '';
+}
+
 // ── Branch extraction ─────────────────────────────────────────────────────────
 
 /**
@@ -195,6 +218,27 @@ function extractBranch() {
     'gr-linked-chip[href*="/q/branch"]',
     '.destBranch .value',
     '.destBranch',
+  ];
+  for (const sel of selectors) {
+    const el = queryShadow(document, sel);
+    const text = el?.textContent?.trim();
+    if (text && text.length < 200) return text;
+  }
+  return '';
+}
+
+// ── Owner extraction ──────────────────────────────────────────────────────────
+
+/**
+ * Extracts the change owner (author) display name from the Gerrit page.
+ * Returns empty string if not found.
+ */
+function extractOwner() {
+  const selectors = [
+    '.owner gr-account-label',
+    'gr-change-metadata .owner gr-account-label',
+    '[data-section="owner"] gr-account-label',
+    'gr-account-chip.owner',
   ];
   for (const sel of selectors) {
     const el = queryShadow(document, sel);
@@ -248,11 +292,14 @@ function extractCommitBody() {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'EXTRACT_INFO') {
     sendResponse({
-      subject:  extractSubject(),
-      issueKey: extractIssueKey(),
-      url:      window.location.href,
-      branch:   extractBranch(),
-      body:     extractCommitBody(),
+      subject:   extractSubject(),
+      issueKey:  extractIssueKey(),
+      url:       window.location.href,
+      branch:    extractBranch(),
+      body:      extractCommitBody(),
+      changeNum: extractChangeNum(),
+      project:   extractProject(),
+      owner:     extractOwner(),
     });
     return false; // synchronous — no need to keep channel open
   }
