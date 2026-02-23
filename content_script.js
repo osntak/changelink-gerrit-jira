@@ -181,6 +181,68 @@ function showToast(message, type = 'info') {
   }, 4500);
 }
 
+// ── Branch extraction ─────────────────────────────────────────────────────────
+
+/**
+ * Extracts the target branch of the Gerrit change (shadow-DOM-aware).
+ * Returns an empty string if not found.
+ */
+function extractBranch() {
+  const selectors = [
+    '.branch .value',
+    'gr-change-metadata .branch',
+    '[data-label="Branch"] .value',
+    'gr-linked-chip[href*="/q/branch"]',
+    '.destBranch .value',
+    '.destBranch',
+  ];
+  for (const sel of selectors) {
+    const el = queryShadow(document, sel);
+    const text = el?.textContent?.trim();
+    if (text && text.length < 200) return text;
+  }
+  return '';
+}
+
+// ── Commit body extraction ────────────────────────────────────────────────────
+
+/**
+ * Extracts the commit message body:
+ *   - First line (title/subject) stripped.
+ *   - Lines matching "jira: ..." removed (redundant in Jira comment).
+ *   - Consecutive blank lines collapsed.
+ * Returns empty string if there is no body or the commit message is not found.
+ */
+function extractCommitBody() {
+  const commitSelectors = [
+    '.commitMessage',
+    'gr-formatted-text.commitMessage',
+    '[slot="commitMessage"]',
+    '.commit-message-container',
+    '[data-testid="commit-message"]',
+    'gr-formatted-text',
+  ];
+
+  for (const sel of commitSelectors) {
+    const els = queryShadowAll(document, sel);
+    for (const el of els) {
+      const text = el.textContent.trim();
+      if (!text) continue;
+
+      const body = text
+        .split('\n')
+        .slice(1)                                          // drop first line (title)
+        .filter(line => !/^\s*jira\s*:/i.test(line))      // drop jira: lines
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')                       // collapse excess blanks
+        .trim();
+
+      return body; // may be empty string — that is fine
+    }
+  }
+  return '';
+}
+
 // ── Message listener ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -189,6 +251,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       subject:  extractSubject(),
       issueKey: extractIssueKey(),
       url:      window.location.href,
+      branch:   extractBranch(),
+      body:     extractCommitBody(),
     });
     return false; // synchronous — no need to keep channel open
   }
