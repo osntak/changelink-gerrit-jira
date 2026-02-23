@@ -21,11 +21,8 @@ const btnReset   = document.getElementById('btn-reset');
 
 // Must match DEFAULT_TEMPLATE in service_worker.js
 const DEFAULT_TEMPLATE =
-`[auto:gerrit]
-{title}
-
+`{title}
 {body}
-
 브랜치: {branch}
 반영 일시: {date}
 Gerrit: {url}`;
@@ -52,8 +49,8 @@ chrome.storage.local.get(
   ({ jiraEmail, jiraToken, commentTemplate }) => {
     if (jiraEmail) emailEl.value = jiraEmail;
     if (jiraToken) tokenEl.value = jiraToken;
-    // Show saved template or leave textarea empty (placeholder shows the default)
-    templateEl.value = commentTemplate ?? '';
+    // Show saved template; initialize with default when not set yet.
+    templateEl.value = commentTemplate ?? DEFAULT_TEMPLATE;
   },
 );
 
@@ -63,12 +60,12 @@ btnSave.addEventListener('click', () => {
   const email = emailEl.value.trim();
   const token = tokenEl.value.trim();
 
-  if (!email || !token) {
-    setStatus('이메일과 토큰을 모두 입력하세요.', 'err');
+  if ((email && !token) || (!email && token)) {
+    setStatus('이메일과 토큰은 함께 입력하거나 둘 다 비워두세요.', 'err');
     return;
   }
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     setStatus('올바른 이메일 형식을 입력하세요.', 'err');
     return;
   }
@@ -76,9 +73,15 @@ btnSave.addEventListener('click', () => {
   // commentTemplate: empty string means "use default" (service worker handles this)
   const templateVal = templateEl.value; // preserve as-is, including empty
 
+  const payload = { commentTemplate: templateVal };
+  if (email && token) {
+    payload.jiraEmail = email;
+    payload.jiraToken = token;
+  }
+
   // Persisted to local storage only — no sync, no logging.
   chrome.storage.local.set(
-    { jiraEmail: email, jiraToken: token, commentTemplate: templateVal },
+    payload,
     () => {
       if (chrome.runtime.lastError) {
         setStatus('저장 중 오류가 발생했습니다.', 'err');
