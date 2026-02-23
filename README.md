@@ -44,7 +44,6 @@ Gerrit change 페이지에서 Jira 연동 3기능을 팝업으로 제공합니�
 - API: `POST /rest/api/3/issue/{issueKey}/comment`
 - 형식: ADF
 - 최소 포함 정보:
-  - `[auto:gerrit]` 마커
   - Gerrit subject
   - Gerrit URL
 - 기존 템플릿 옵션은 유지되며, 최소 정보가 누락되면 보정합니다.
