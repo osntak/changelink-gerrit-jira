@@ -17,8 +17,7 @@ const JIRA_BASE = 'https://yourcompany.atlassian.net';
 const JIRA_ALLOWED_HOST = 'yourcompany.atlassian.net';
 
 const DEFAULT_TEMPLATE =
-`[auto:gerrit]
-{title}
+`{title}
 
 {body}
 
@@ -146,9 +145,6 @@ function renderTemplate(template, vars) {
 function ensureCommentMinimum(text, vars) {
   let out = (text || '').trim();
 
-  if (!out.includes('[auto:gerrit]')) {
-    out = `[auto:gerrit]\n${out}`.trim();
-  }
   if (vars.title && !out.includes(vars.title)) {
     out = `${out}\n\n제목: ${vars.title}`;
   }
