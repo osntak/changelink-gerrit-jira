@@ -307,6 +307,7 @@
         <tr><td><code>{body}</code></td><td>커밋 메시지 본문 (제목·jira 라인 제외)</td></tr>
         <tr><td><code>{branch}</code></td><td>타겟 브랜치명</td></tr>
         <tr><td><code>{change_num}</code></td><td>Gerrit change 번호 (예: 12345)</td></tr>
+        <tr><td><code>{change_id}</code></td><td>Gerrit Change-Id (예: Iabc123...)</td></tr>
         <tr><td><code>{project}</code></td><td>저장소 경로 (예: platform/myapp)</td></tr>
         <tr><td><code>{owner}</code></td><td>change 작성자 이름</td></tr>
         <tr><td><code>{date}</code></td><td>반영 일시 (YYYY-MM-DD HH:MM)</td></tr>
@@ -324,7 +325,8 @@
 
 브랜치: {branch}
 반영 일시: {date}
-Gerrit: {url}"
+Gerrit: {url}
+Change-Id: {change_id}"
     ></textarea>
     <button id="btn-reset">기본값으로 초기화</button>
   </div>

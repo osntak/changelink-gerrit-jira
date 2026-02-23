@@ -2,7 +2,6 @@
 
 const MSG = self.MESSAGE_TYPES;
 
-const issueKeyEl = document.getElementById('issue-key');
 const subjectEl = document.getElementById('subject');
 const issueCardEl = document.getElementById('issue-card');
 const issueSummaryEl = document.getElementById('issue-summary');
@@ -15,9 +14,10 @@ const btnComment = document.getElementById('btn-comment');
 const fabEnabledEl = document.getElementById('fab-enabled');
 const btnOptions = document.getElementById('btn-options');
 const issueKeyInputEl = document.getElementById('issue-key-input');
-const issueLinkEl = document.getElementById('issue-link');
+const btnOpenIssue = document.getElementById('btn-open-issue');
 
 let currentContext = null;
+let authConfigured = true;
 const JIRA_BASE = 'https://yourcompany.atlassian.net';
 
 function setStatus(message, cls) {
@@ -35,11 +35,21 @@ function isGerritChangeUrl(url) {
 }
 
 function syncActionButtons() {
+  if (!authConfigured) {
+    btnRefresh.disabled = true;
+    btnLink.disabled = true;
+    btnComment.disabled = true;
+    btnOpenIssue.disabled = true;
+    issueKeyInputEl.disabled = true;
+    return;
+  }
+
+  issueKeyInputEl.disabled = false;
   btnRefresh.disabled = false;
   const key = getEffectiveIssueKey();
   btnLink.disabled = !key;
   btnComment.disabled = !key;
-  syncIssueLink();
+  btnOpenIssue.disabled = !key;
 }
 
 function setActionBusy(isBusy) {
@@ -54,7 +64,6 @@ function setActionBusy(isBusy) {
 
 function renderContext(context) {
   currentContext = context;
-  issueKeyEl.textContent = context.issueKey || '-';
   subjectEl.textContent = context.subject || '(제목 없음)';
   if (!issueKeyInputEl.value && context.issueKey) {
     issueKeyInputEl.value = context.issueKey;
@@ -82,17 +91,6 @@ function buildIssueUrl(issueKey) {
   return `${JIRA_BASE}/browse/${encodeURIComponent(issueKey)}`;
 }
 
-function syncIssueLink() {
-  const key = getEffectiveIssueKey();
-  if (!key) {
-    issueLinkEl.href = '#';
-    issueLinkEl.setAttribute('aria-disabled', 'true');
-    return;
-  }
-  issueLinkEl.href = buildIssueUrl(key);
-  issueLinkEl.setAttribute('aria-disabled', 'false');
-}
-
 function loadFabSetting() {
   return new Promise((resolve) => {
     chrome.storage.local.get(['fabEnabled'], ({ fabEnabled }) => {
@@ -101,6 +99,16 @@ function loadFabSetting() {
       resolve(enabled);
     });
   });
+}
+
+async function loadAuthState() {
+  try {
+    const resp = await sendMessage({ type: MSG.POPUP_GET_AUTH_STATE });
+    authConfigured = !!resp?.configured;
+  } catch {
+    authConfigured = false;
+  }
+  syncActionButtons();
 }
 
 function renderIssueCard(issue) {
@@ -132,7 +140,6 @@ async function loadContext() {
     if (!resp?.ok) {
       hideIssueCard();
       currentContext = null;
-      issueKeyEl.textContent = '-';
       subjectEl.textContent = '-';
       syncActionButtons();
       setStatus(resp?.message || 'Gerrit 페이지를 찾을 수 없습니다.', 'warn');
@@ -140,14 +147,11 @@ async function loadContext() {
     }
 
     renderContext(resp.context);
-
-    if (!resp.context.issueKey) {
+    if (!getEffectiveIssueKey()) {
       hideIssueCard();
-      setStatus('PROJ-123 같은 이슈키가 필요합니다. 제목 또는 커밋 메시지에 jira: KEY를 추가하세요.', 'warn');
-      syncActionButtons();
-      return false;
+      setStatus('Issue key를 입력하거나 자동 감지를 확인하세요.', 'warn');
+      return true;
     }
-
     setStatus('컨텍스트 확인 완료. 이슈 조회를 실행합니다.', 'ok');
     return true;
   } catch {
@@ -185,6 +189,10 @@ async function setFabEnabled(enabled) {
 }
 
 async function fetchIssue() {
+  if (!authConfigured) {
+    setStatus('Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.', 'warn');
+    return;
+  }
   const issueKey = getEffectiveIssueKey();
   if (!issueKey) {
     setStatus('이슈키를 먼저 확인하세요.', 'warn');
@@ -215,6 +223,10 @@ async function fetchIssue() {
 }
 
 async function addRemoteLink() {
+  if (!authConfigured) {
+    setStatus('Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.', 'warn');
+    return;
+  }
   const issueKey = getEffectiveIssueKey();
   if (!issueKey) {
     setStatus('이슈키를 먼저 확인하세요.', 'warn');
@@ -238,6 +250,10 @@ async function addRemoteLink() {
 }
 
 async function addComment() {
+  if (!authConfigured) {
+    setStatus('Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.', 'warn');
+    return;
+  }
   const issueKey = getEffectiveIssueKey();
   if (!issueKey) {
     setStatus('이슈키를 먼저 확인하세요.', 'warn');
@@ -258,6 +274,20 @@ async function addComment() {
   } finally {
     setActionBusy(false);
   }
+}
+
+function openIssuePage() {
+  if (!authConfigured) {
+    setStatus('Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.', 'warn');
+    return;
+  }
+  const issueKey = getEffectiveIssueKey();
+  if (!issueKey) {
+    setStatus('이슈키를 먼저 확인하세요.', 'warn');
+    return;
+  }
+  chrome.tabs.create({ url: buildIssueUrl(issueKey) });
+  window.close();
 }
 
 btnRefresh.addEventListener('click', async () => {
@@ -282,20 +312,21 @@ issueKeyInputEl.addEventListener('input', () => {
 btnOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
-issueLinkEl.addEventListener('click', (e) => {
-  if (issueLinkEl.getAttribute('aria-disabled') === 'true') {
-    e.preventDefault();
-    return;
-  }
-  window.close();
-});
+btnOpenIssue.addEventListener('click', openIssuePage);
 
 (async () => {
   currentContext = null;
+  authConfigured = true;
   syncActionButtons();
+  await loadAuthState();
+  if (!authConfigured) {
+    setStatus('Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.', 'warn');
+    await loadFabSetting();
+    return;
+  }
   await loadFabSetting();
   const ready = await loadContext();
-  if (ready && isGerritChangeUrl(currentContext?.gerritUrl || '')) {
+  if (ready && isGerritChangeUrl(currentContext?.gerritUrl || '') && getEffectiveIssueKey()) {
     await fetchIssue();
   } else if (ready) {
     setStatus('Gerrit change URL에서 자동 조회가 실행됩니다.', 'warn');

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Gerrit → Jira Comment",
+  "name": "Gerrit Jira Tools",
   "version": "1.1.0",
   "description": "Gerrit change 페이지에서 Jira 이슈 조회/웹링크 추가/코멘트 생성을 수행합니다.",
   "permissions": [
@@ -17,7 +17,7 @@
     "service_worker": "service_worker.js"
   },
   "action": {
-    "default_title": "Gerrit → Jira Tools",
+    "default_title": "Gerrit Jira Tools",
     "default_popup": "popup.html"
   },
   "options_ui": {

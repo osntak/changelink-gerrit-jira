@@ -92,29 +92,36 @@
       background: #fff;
     }
 
+    .field-inline {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .field-inline input {
+      flex: 1;
+    }
+
     .value {
       color: var(--ink);
       font-weight: 600;
       word-break: break-word;
     }
 
-    .key-link {
+    .arrow-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      padding: 0;
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      width: fit-content;
-      margin-top: 2px;
-      font-size: 12px;
-      color: var(--pri);
-      text-decoration: none;
-      border-bottom: 1px dashed rgba(21, 101, 192, 0.35);
-      padding-bottom: 1px;
+      justify-content: center;
     }
 
-    .key-link[aria-disabled="true"] {
-      color: #8a96aa;
-      border-bottom-color: rgba(138, 150, 170, 0.35);
-      pointer-events: none;
+    .icon-svg {
+      width: 16px;
+      height: 16px;
+      display: block;
     }
 
     .btn-row {
@@ -221,6 +228,7 @@
       font-size: 12px;
       background: #ecf2fb;
       color: var(--pri);
+      white-space: pre-line;
     }
 
     .status.ok { background: #e8f5e9; color: var(--ok); }
@@ -236,16 +244,23 @@
         <button id="btn-options" class="icon-btn" title="옵션 열기" aria-label="옵션 열기">⚙</button>
       </div>
       <div class="kv">
-        <div>Detected issue key</div>
-        <div id="issue-key" class="value">-</div>
-        <a id="issue-link" class="key-link" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">이슈 페이지 이동</a>
         <div>Subject</div>
         <div id="subject" class="value">-</div>
       </div>
 
       <div class="field">
-        <label for="issue-key-input">Issue key override (optional)</label>
-        <input id="issue-key-input" type="text" placeholder="PROJ-123">
+        <label for="issue-key-input">Issue key</label>
+        <div class="field-inline">
+          <input id="issue-key-input" type="text" placeholder="PROJ-123">
+          <button id="btn-open-issue" class="arrow-btn" title="이슈 페이지 이동" aria-label="이슈 페이지 이동">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14 3h7v7"></path>
+              <path d="M10 14 21 3"></path>
+              <path d="M21 14v7h-7"></path>
+              <path d="M3 10v11h11"></path>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div class="btn-row">
