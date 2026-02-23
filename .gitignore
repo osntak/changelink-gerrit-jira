@@ -1,2 +1,5 @@
 node_modules/
 *.zip
+.DS_Store
+.idea/
+gerrit-jira-automation-v*/
