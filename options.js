@@ -22,7 +22,9 @@ const btnReset   = document.getElementById('btn-reset');
 // Must match DEFAULT_TEMPLATE in service_worker.js
 const DEFAULT_TEMPLATE =
 `{title}
+
 {body}
+
 브랜치: {branch}
 반영 일시: {date}
 Gerrit: {url}
