@@ -7,6 +7,21 @@
 const MSG = self.MESSAGE_TYPES;
 const FAB_ROOT_ID = 'gj-fab-root';
 const ISSUE_DIALOG_ID = '__gj_issue_dialog__';
+const NETWORK_HOOK_SCRIPT_ID = '__gj_network_hook__';
+const NETWORK_CONTEXT_EVENT_TYPE = 'GJ_NETWORK_CONTEXT';
+
+let networkContextCache = {
+  issueKey: null,
+  subject: '',
+  branch: '',
+  body: '',
+  changeNum: '',
+  project: '',
+  owner: '',
+  changeId: '',
+};
+
+const JIRA_BASE = 'https://yourcompany.atlassian.net';
 
 // -- Shadow-DOM helpers -------------------------------------------------------
 
@@ -36,9 +51,72 @@ function queryShadowAll(root, selector) {
 const ISSUE_KEY_RE = /\b([A-Z][A-Z0-9]+-\d+)\b/i;
 const JIRA_TAG_RE = /jira\s*:\s*([A-Z][A-Z0-9]+-\d+)/i;
 const CHANGE_ID_RE = /\bChange-Id\s*:\s*(I[a-f0-9]{40})\b/i;
+const JIRA_BROWSE_RE = /\/browse\/([A-Z][A-Z0-9]+-\d+)\b/i;
 
 function normalizeIssueKey(key) {
   return key ? String(key).toUpperCase() : null;
+}
+
+function mergeNetworkContext(partial) {
+  networkContextCache = {
+    ...networkContextCache,
+    ...partial,
+  };
+}
+
+function parseGerritJson(raw) {
+  if (!raw) return null;
+  const stripped = String(raw).replace(/^\)\]\}'\s*\n?/, '').trim();
+  if (!stripped) return null;
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    return null;
+  }
+}
+
+function deriveContextFromPayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const subject = String(payload.subject || '').trim();
+  const branch = String(payload.branch || '').trim();
+  const project = String(payload.project || '').trim();
+  const owner = String(payload?.owner?.name || payload?.owner?.username || '').trim();
+  const changeNum = String(payload?._number || '').trim();
+
+  const revisions = payload.revisions || {};
+  const currentRevisionKey = payload.current_revision;
+  const currentRevision = currentRevisionKey ? revisions[currentRevisionKey] : null;
+  const commitMessage = String(currentRevision?.commit?.message || '').trim();
+
+  const changeIdMatch = commitMessage.match(/\bChange-Id\s*:\s*(I[a-f0-9]{40})\b/i);
+  const changeId = changeIdMatch ? changeIdMatch[1] : '';
+
+  const body = commitMessage
+    ? commitMessage
+      .split('\n')
+      .slice(1)
+      .filter((line) => !/^\s*jira\s*:/i.test(line))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+    : '';
+
+  const issueKey =
+    extractIssueKeyFromText(subject) ||
+    extractIssueKeyFromText(commitMessage) ||
+    null;
+
+  return {
+    issueKey,
+    subject,
+    branch,
+    body,
+    changeNum,
+    project,
+    owner,
+    changeId,
+  };
 }
 
 function extractIssueKeyFromText(text) {
@@ -81,6 +159,7 @@ function getCommitMessageText() {
     '#commitMessage',
     '#commitMessageEditor',
     'gr-editable-content#commitMessageEditor',
+    'pre.plaintext',
     '.commitMessage',
     'gr-formatted-text.commitMessage',
     '[slot="commitMessage"]',
@@ -109,17 +188,34 @@ function extractIssueKey() {
   const fromTitle = extractIssueKeyFromText(document.title);
   if (fromTitle) return fromTitle;
 
-  // 2) commit message (jira: KEY or bare key)
+  // 2) Gerrit API payload cache (fetch/xhr intercept)
+  if (networkContextCache.issueKey) return networkContextCache.issueKey;
+
+  // 3) commit message (jira: KEY or bare key)
   const commitText = getCommitMessageText();
   const fromCommit = extractIssueKeyFromText(commitText);
   if (fromCommit) return fromCommit;
 
-  // 3) fallback: page text sample (for Gerrit DOM variations)
+  // 3.5) direct extraction from Jira browse links in rendered commit message
+  for (const sel of ['a[href*="atlassian.net/browse/"]', 'a[href*="/browse/"]']) {
+    const links = queryShadowAll(document, sel);
+    for (const link of links) {
+      const href = String(link.getAttribute('href') || '');
+      const hrefMatch = href.match(JIRA_BROWSE_RE);
+      if (hrefMatch) return normalizeIssueKey(hrefMatch[1]);
+
+      const text = (link.textContent || '').trim();
+      const textMatch = text.match(ISSUE_KEY_RE);
+      if (textMatch) return normalizeIssueKey(textMatch[1]);
+    }
+  }
+
+  // 4) fallback: page text sample (for Gerrit DOM variations)
   const pageText = (document.body?.innerText || '').slice(0, 60000);
   const fromBody = extractIssueKeyFromText(pageText);
   if (fromBody) return fromBody;
 
-  // 4) fallback: gather text inside open shadow roots explicitly
+  // 5) fallback: gather text inside open shadow roots explicitly
   const shadowTextChunks = [];
   for (const el of document.querySelectorAll('*')) {
     if (el.shadowRoot) {
@@ -132,7 +228,7 @@ function extractIssueKey() {
     if (fromShadowText) return fromShadowText;
   }
 
-  // 5) broad scan across common Gerrit nodes inside open shadow roots
+  // 6) broad scan across common Gerrit nodes inside open shadow roots
   const broadSelectors = [
     '#subject',
     '.header-title',
@@ -228,16 +324,22 @@ function extractChangeId() {
 
 function extractContext() {
   return {
-    issueKey: extractIssueKey(),
-    subject: extractSubject(),
+    issueKey: extractIssueKey() || networkContextCache.issueKey,
+    subject: extractSubject() || networkContextCache.subject,
     gerritUrl: window.location.href,
-    branch: extractBranch(),
-    body: extractCommitBody(),
-    changeNum: extractChangeNum(),
-    project: extractProject(),
-    owner: extractOwner(),
-    changeId: extractChangeId(),
+    branch: extractBranch() || networkContextCache.branch,
+    body: extractCommitBody() || networkContextCache.body,
+    changeNum: extractChangeNum() || networkContextCache.changeNum,
+    project: extractProject() || networkContextCache.project,
+    owner: extractOwner() || networkContextCache.owner,
+    changeId: extractChangeId() || networkContextCache.changeId,
   };
+}
+
+function initNetworkContextBridge() {
+  // Disabled: inline/page script injection is blocked by Gerrit CSP.
+  // Keep this as a no-op to avoid runtime CSP errors.
+  return;
 }
 
 function hasIssueKey(context) {
@@ -520,6 +622,17 @@ async function handleFabAddComment() {
   }
 }
 
+function openJiraIssueInNewTab() {
+  const ctx = extractContext();
+  const key = normalizeIssueKey(ctx.issueKey);
+  if (!key) {
+    showToast('이슈키를 찾을 수 없습니다.', 'warn');
+    return;
+  }
+
+  window.open(`${JIRA_BASE}/browse/${encodeURIComponent(key)}`, '_blank', 'noopener,noreferrer');
+}
+
 function buildFabActionButton({ id, icon, title, onClick }) {
   const btn = document.createElement('button');
   btn.id = id;
@@ -598,6 +711,13 @@ function renderFab() {
     icon: '💬',
     title: '코멘트 생성',
     onClick: handleFabAddComment,
+  }));
+
+  menu.appendChild(buildFabActionButton({
+    id: 'gj-fab-open-issue',
+    icon: '↗',
+    title: '이슈 페이지 이동',
+    onClick: openJiraIssueInNewTab,
   }));
 
   const mainButton = document.createElement('button');
@@ -688,3 +808,4 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 initFabFromStorage();
+initNetworkContextBridge();

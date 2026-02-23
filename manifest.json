@@ -5,7 +5,8 @@
   "description": "Gerrit change 페이지에서 Jira 이슈 조회/웹링크 추가/코멘트 생성을 수행합니다.",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "http://gerrit.example.com/*",

@@ -15,8 +15,10 @@ const btnComment = document.getElementById('btn-comment');
 const fabEnabledEl = document.getElementById('fab-enabled');
 const btnOptions = document.getElementById('btn-options');
 const issueKeyInputEl = document.getElementById('issue-key-input');
+const issueLinkEl = document.getElementById('issue-link');
 
 let currentContext = null;
+const JIRA_BASE = 'https://yourcompany.atlassian.net';
 
 function setStatus(message, cls) {
   statusEl.textContent = message;
@@ -37,6 +39,7 @@ function syncActionButtons() {
   const key = getEffectiveIssueKey();
   btnLink.disabled = !key;
   btnComment.disabled = !key;
+  syncIssueLink();
 }
 
 function setActionBusy(isBusy) {
@@ -73,6 +76,21 @@ function getEffectiveIssueKey() {
   const detected = normalizeIssueKey(currentContext?.issueKey);
   if (isValidIssueKey(detected)) return detected;
   return '';
+}
+
+function buildIssueUrl(issueKey) {
+  return `${JIRA_BASE}/browse/${encodeURIComponent(issueKey)}`;
+}
+
+function syncIssueLink() {
+  const key = getEffectiveIssueKey();
+  if (!key) {
+    issueLinkEl.href = '#';
+    issueLinkEl.setAttribute('aria-disabled', 'true');
+    return;
+  }
+  issueLinkEl.href = buildIssueUrl(key);
+  issueLinkEl.setAttribute('aria-disabled', 'false');
 }
 
 function loadFabSetting() {
@@ -263,6 +281,13 @@ issueKeyInputEl.addEventListener('input', () => {
 });
 btnOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
+});
+issueLinkEl.addEventListener('click', (e) => {
+  if (issueLinkEl.getAttribute('aria-disabled') === 'true') {
+    e.preventDefault();
+    return;
+  }
+  window.close();
 });
 
 (async () => {
