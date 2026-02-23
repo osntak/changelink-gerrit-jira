@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Update manifest version
+        run: |
+          jq --arg v "${{ steps.version.outputs.VERSION }}" '.version = $v' manifest.json > manifest.tmp.json
+          mv manifest.tmp.json manifest.json
+
+      - name: Build extension zip
+        run: |
+          ZIP_NAME="gerrit-jira-automation-${{ github.ref_name }}.zip"
+          zip -r "$ZIP_NAME" \
+            manifest.json \
+            content_script.js \
+            service_worker.js \
+            options.html \
+            options.js
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Gerrit → Jira Comment ${{ github.ref_name }}"
+          generate_release_notes: true
+          files: ${{ env.ZIP_NAME }}
+          body: |
+            ## 설치 방법
+
+            1. 아래 **Assets** 에서 `gerrit-jira-automation-${{ github.ref_name }}.zip` 다운로드
+            2. Chrome 주소창에 `chrome://extensions` 입력
+            3. 우측 상단 **개발자 모드** 켜기
+            4. zip 파일 압축 해제 후 **압축 해제된 확장 프로그램 로드** 클릭
+            5. 옵션 페이지에서 Jira URL / 이메일 / API 토큰 입력
+
+            ---
