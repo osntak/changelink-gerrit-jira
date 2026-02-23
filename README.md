@@ -1,126 +1,154 @@
-# Gerrit Jira Automation (Chrome Extension, MV3)
+# Gerrit Jira Tools (Chrome Extension, MV3)
 
-Gerrit change 페이지에서 Jira 연동 3기능을 팝업으로 제공합니다.
+Gerrit change 페이지에서 Jira 작업을 빠르게 수행하는 Chrome 확장 프로그램입니다.
 
-1. 이슈 조회 (summary/status/assignee)
-2. 웹링크(Remote Link) 추가
-3. 코멘트 생성 (ADF)
-4. FAB On/Off 토글 (`chrome.storage.local.fabEnabled`, 기본값 true)
+- 이슈 조회
+- 웹링크(Remote Link) 추가
+- 코멘트 생성(ADF)
+- Jira 이슈 페이지 바로 열기
+- FAB(빠른 액션 메뉴) On/Off
 
-## 현재 상태 점검 (코드 기준)
+## 1. 빠른 시작
 
-- 기존 UX(v1.0): 툴바 아이콘 클릭 시 즉시 코멘트 생성
-  - 근거: 이전 `chrome.action.onClicked` 기반 동작
-- 현재 UX(v1.1+): 툴바 아이콘 클릭 시 `popup.html` 열림, 팝업에서 기능 선택 실행
-  - 근거: `manifest.json`의 `action.default_popup = popup.html`
-
-네트워크 호출은 원칙대로 background(service worker)에서만 수행합니다.
-
-- Jira API 호출 위치: `service_worker.js`
-- content script 역할: Gerrit DOM 컨텍스트 추출 + 토스트 표시
-
-## 기능 상세
-
-### 1) 이슈 조회
-
-- API: `GET /rest/api/3/issue/{issueKey}?fields=summary,status,assignee`
-- 팝업 카드 표시:
-  - Summary
-  - Status
-  - Assignee (없으면 `Unassigned`)
-
-### 2) 웹링크 추가 (Remote Link)
-
-- API: `POST /rest/api/3/issue/{issueKey}/remotelink`
-- 매핑:
-  - `object.url = gerritUrl`
-  - `object.title = Gerrit: {subject}`
-  - `globalId` (가능하면):
-    - `gerrit:change:{changeNumber}`
-    - 또는 `gerrit:changeid:{Change-Id}`
-
-### 3) 코멘트 생성
-
-- API: `POST /rest/api/3/issue/{issueKey}/comment`
-- 형식: ADF
-- 최소 포함 정보:
-  - Gerrit subject
-  - Gerrit URL
-- 기존 템플릿 옵션은 유지되며, 최소 정보가 누락되면 보정합니다.
-
-## 이슈키 추출 규칙
-
-content script에서 아래 우선순위로 탐지합니다.
-
-1. subject/title의 bare key (`PROJ-123`)
-2. commit message의 `jira: KEY`
-
-정규식: `/([A-Z][A-Z0-9]+-\d+)/`
-
-## 보안 정책
-
-- 자격증명 저장: `chrome.storage.local`만 사용 (`sync` 미사용)
-- 민감정보 보호:
-  - 이메일/토큰/Authorization 헤더를 로그/UI에 원문 노출하지 않음
-- host_permissions 최소 고정:
-  - `http://gerrit.example.com/*`
-  - `https://gerrit.example.com/*`
-  - `https://yourcompany.atlassian.net/*`
-- Jira Base URL:
-  - 기본값 `https://yourcompany.atlassian.net`
-  - allowlist(`yourcompany.atlassian.net`) 검증 강제
-- 오류 메시지:
-  - 상태코드 기반 요약만 표시 (400/401/403/404)
-  - 응답 body 원문 미노출
-
-## 아키텍처
-
-- `manifest.json`: MV3 설정, popup 진입점
-- `message_types.js`: runtime 메시지 상수
-- `service_worker.js`: JiraClient(fetch/auth/error mapping), 3기능 API 처리
-- `content_script.js`: Gerrit 컨텍스트 추출 + FAB 렌더링/제거
-- `popup.html`, `popup.js`: 통합 UI(조회/웹링크/코멘트/FAB 토글)
-- `options.html`, `options.js`: 이메일/토큰/템플릿 저장 + 연결 테스트
-
-## 설치 및 실행
-
-1. 저장소 다운로드
-2. `chrome://extensions` 접속
-3. 개발자 모드 ON
-4. 압축해제된 확장프로그램 로드
-5. 이 폴더 선택
-
-## 옵션 설정
-
-1. 확장 옵션 페이지 열기
-2. Jira 이메일/토큰 입력 후 저장
-3. (선택) 연결 테스트 실행
-
-## 사용 방법
-
-1. Gerrit change 페이지 열기
-2. 툴바 아이콘 클릭해서 팝업 열기
-3. `이슈 조회 / 새로고침`으로 감지 및 카드 확인
-4. 필요 시 `Enable FAB` 토글로 Gerrit 페이지 FAB 표시 여부를 즉시 전환
-5. `웹링크 추가` 또는 `코멘트 생성` 실행
-
-## 트러블슈팅
-
-- 400: 이슈 키/요청 형식 확인
-- 401: 이메일/토큰 확인
-- 403: Jira 권한 확인
-- 404: 이슈 키 존재 여부 확인
-- Gerrit 페이지 아님: Gerrit change 상세 페이지에서 실행 필요
-- issueKey 미탐지: 제목 또는 커밋 메시지에 `PROJ-123` / `jira: PROJ-123` 추가
-
-## 빌드
+### 1) ZIP 준비
 
 ```bash
 npm run build
 ```
 
-산출물: `gerrit-jira-automation-v<manifest.version>.zip`
+생성 파일:
 
-## 라이선스
+- `gerrit-jira-automation-v1.1.0.zip` (manifest 버전에 따라 파일명 변경)
+
+### 2) Chrome에 설치
+
+1. `chrome://extensions` 접속
+2. 우측 상단 `개발자 모드` ON
+3. ZIP 압축 해제
+4. `압축해제된 확장 프로그램을 로드합니다` 클릭
+5. 압축 해제한 폴더 선택
+
+## 2. 초기 설정 (필수)
+
+1. 확장 아이콘 클릭
+2. 우측 상단 `⚙` 버튼(옵션) 클릭
+3. Jira 이메일 + Jira API 토큰 입력
+4. `저장` 클릭
+5. 필요 시 `연결 테스트` 실행
+
+Jira API 토큰 발급:
+
+- <https://id.atlassian.com/manage-profile/security/api-tokens>
+
+## 3. 사용 방법
+
+### 팝업 액션 (권장)
+
+Gerrit change 페이지(`.../c/.../+/...`)에서 확장 아이콘 클릭.
+
+팝업에서 사용 가능한 액션 4개:
+
+1. `이슈 조회 / 새로고침`
+2. `웹링크 추가`
+3. `코멘트 생성`
+4. `이슈 페이지 이동` (외부 링크 아이콘)
+
+`Issue key` 입력칸 동작:
+
+- 자동 감지 성공 시 키 자동 입력
+- 필요하면 수동으로 `PROJ-123` 형태 입력
+
+### FAB 액션
+
+팝업의 `Enable FAB`를 켜면 Gerrit 페이지 우하단에 FAB가 나타납니다.
+
+FAB에서 같은 4개 액션 제공:
+
+1. 이슈 페이지 이동
+2. 이슈 조회
+3. 웹링크 추가
+4. 코멘트 생성
+
+## 4. 댓글 템플릿
+
+옵션 페이지에서 Jira 댓글 템플릿 편집 가능.
+
+지원 플레이스홀더:
+
+- `{title}`
+- `{body}`
+- `{branch}`
+- `{change_num}`
+- `{change_id}`
+- `{project}`
+- `{owner}`
+- `{date}`
+- `{url}`
+
+기본 템플릿은 `Change-Id`를 맨 아래에 배치합니다.
+
+주의:
+
+- `{body}`에서는 아래 메타 라인을 자동 제거합니다.
+- `jira: ...`
+- `Change-Id: ...`
+- `cherry-picked from ...`
+
+## 5. 보안 정책
+
+- 자격증명 저장: `chrome.storage.local`만 사용 (`sync` 미사용)
+- 토큰/이메일/Authorization 헤더 로그 노출 금지
+- Jira 응답 본문(raw body) 미표시, 상태코드 기반 메시지 사용
+- 고정 host permissions만 허용:
+  - `http://gerrit.example.com/*`
+  - `https://gerrit.example.com/*`
+  - `https://yourcompany.atlassian.net/*`
+
+## 6. 트러블슈팅
+
+### `이슈키를 찾지 못했습니다`가 뜰 때
+
+1. `Issue key`에 직접 `PROJ-123` 입력
+2. Gerrit 탭 새로고침 후 다시 시도
+3. 제목/커밋 메시지에 이슈 키가 실제로 있는지 확인
+
+### `Jira 이메일/토큰이 설정되지 않았습니다`가 뜰 때
+
+- 옵션 페이지에서 이메일/토큰 저장 필요
+- 미설정 상태에서는 주요 액션 버튼이 비활성화됨
+
+### CSP 오류(Inline Script 차단)
+
+- Gerrit CSP 정책상 인라인 주입은 차단됨
+- 현재 버전은 해당 경로를 사용하지 않도록 처리되어 있음
+
+## 7. 릴리즈/배포
+
+### GitHub Actions 자동 릴리즈 (태그 기반)
+
+- 트리거: `v*.*.*` 태그 푸시
+
+```bash
+git push origin v1.1.0
+```
+
+### GitHub Actions 수동 실행 (Run workflow)
+
+- `Actions > Release > Run workflow`
+- 입력값 `tag`: 예) `v1.1.0`
+
+워크플로우가 수행하는 작업:
+
+1. manifest 버전 동기화
+2. ZIP 빌드
+3. GitHub Release 생성 + Release Notes + Assets 업로드
+
+## 8. 개발 메모
+
+- 네트워크 호출(Jira API)은 `service_worker.js`에서만 수행
+- `content_script.js`는 DOM 컨텍스트 추출과 FAB UI 처리 담당
+- 팝업은 `popup.html` + `popup.js`
+
+## License
 
 Internal use only.
