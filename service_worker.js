@@ -155,6 +155,7 @@ async function getActiveGerritContext() {
       project: String(context?.project || '').trim(),
       owner: String(context?.owner || '').trim(),
       changeId: String(context?.changeId || '').trim(),
+      submittedAt: String(context?.submittedAt || '').trim(),
     };
 
     if (!isAllowedChangeUrl(safeContext.gerritUrl)) {
@@ -173,6 +174,31 @@ async function getActiveGerritContext() {
 function formatDate(d) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function parseGerritTimestampUtc(raw) {
+  const m = String(raw || '')
+    .trim()
+    .match(
+      /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?$/,
+    );
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = Number(m[6] || 0);
+  const milli = Number((m[7] || '').slice(0, 3).padEnd(3, '0'));
+  return new Date(Date.UTC(year, month, day, hour, minute, second, milli));
+}
+
+function formatDateMaybe(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const parsed = parseGerritTimestampUtc(raw) || new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return formatDate(parsed);
 }
 
 function renderTemplate(template, vars) {
@@ -411,6 +437,7 @@ function buildRemoteLinkPayload(context) {
 async function buildCommentAdf(context) {
   const { commentTemplate } = await loadStorageData();
   const template = (commentTemplate || '').trim() || DEFAULT_TEMPLATE;
+  const reflectedAt = formatDateMaybe(context.submittedAt);
 
   const rendered = renderTemplate(template, {
     title: context.subject || '(no title)',
@@ -420,7 +447,7 @@ async function buildCommentAdf(context) {
     changeId: context.changeId || '',
     project: context.project || '',
     owner: context.owner || '',
-    date: formatDate(new Date()),
+    date: reflectedAt,
     url: context.gerritUrl,
   });
 
