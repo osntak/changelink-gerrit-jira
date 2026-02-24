@@ -20,6 +20,7 @@ let networkContextCache = {
   project: '',
   owner: '',
   changeId: '',
+  submittedAt: '',
 };
 
 const JIRA_BASE = 'https://yourcompany.atlassian.net';
@@ -138,6 +139,7 @@ function deriveContextFromPayload(payload) {
   const project = String(payload.project || '').trim();
   const owner = String(payload?.owner?.name || payload?.owner?.username || '').trim();
   const changeNum = String(payload?._number || '').trim();
+  const submittedAt = String(payload.submitted || payload.updated || '').trim();
 
   const revisions = payload.revisions || {};
   const currentRevisionKey = payload.current_revision;
@@ -175,6 +177,7 @@ function deriveContextFromPayload(payload) {
     project,
     owner,
     changeId,
+    submittedAt,
   };
 }
 
@@ -437,15 +440,16 @@ function extractChangeId() {
 
 function extractContext() {
   return {
-    issueKey: extractIssueKey() || networkContextCache.issueKey,
-    subject: extractSubject() || networkContextCache.subject,
+    issueKey: networkContextCache.issueKey || extractIssueKey(),
+    subject: networkContextCache.subject || extractSubject(),
     gerritUrl: window.location.href,
-    branch: extractBranch() || networkContextCache.branch,
-    body: extractCommitBody() || networkContextCache.body,
-    changeNum: extractChangeNum() || networkContextCache.changeNum,
-    project: extractProject() || networkContextCache.project,
-    owner: extractOwner() || networkContextCache.owner,
-    changeId: extractChangeId() || networkContextCache.changeId,
+    branch: networkContextCache.branch || extractBranch(),
+    body: networkContextCache.body || extractCommitBody(),
+    changeNum: networkContextCache.changeNum || extractChangeNum(),
+    project: networkContextCache.project || extractProject(),
+    owner: networkContextCache.owner || extractOwner(),
+    changeId: networkContextCache.changeId || extractChangeId(),
+    submittedAt: networkContextCache.submittedAt,
   };
 }
 
@@ -464,12 +468,17 @@ function hasIssueKey(context) {
  * Retry briefly so popup/FAB actions do not fail just because extraction happened too early.
  */
 function extractContextWithRetry(timeoutMs = 1800) {
+  // Kick off detail API enrichment immediately and prefer it over DOM fallback.
+  const detailPromise = fetchGerritDetailContext();
   const first = extractContext();
-  if (hasIssueKey(first) && first.branch) return Promise.resolve(first);
+  if (hasIssueKey(first) && first.branch && first.submittedAt) {
+    return Promise.resolve(first);
+  }
 
   return new Promise((resolve) => {
     const startedAt = Date.now();
     let done = false;
+    let detailFetchDone = false;
 
     const finish = (ctx) => {
       if (done) return;
@@ -482,11 +491,16 @@ function extractContextWithRetry(timeoutMs = 1800) {
 
     const checkNow = () => {
       const ctx = extractContext();
-      if (hasIssueKey(ctx) && ctx.branch) finish(ctx);
+      const readyBase = hasIssueKey(ctx) && ctx.branch;
+      if (!readyBase) return;
+      // `submittedAt` is populated from Gerrit detail payload cache.
+      // Wait until detail fetch has completed once so we don't return too early.
+      if (ctx.submittedAt || detailFetchDone) finish(ctx);
     };
 
     // DOM만으로 충분치 않은 경우 Gerrit detail API를 한번 조회해 보강.
-    fetchGerritDetailContext().finally(() => {
+    detailPromise.finally(() => {
+      detailFetchDone = true;
       checkNow();
     });
 
