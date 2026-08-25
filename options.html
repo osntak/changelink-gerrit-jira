@@ -3,7 +3,7 @@
 <head>
   <meta charset="UPROJ-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gerrit Jira Tools — 옵션</title>
+  <title>Gerrit Jira Tools — 설정</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
 
@@ -82,35 +82,76 @@
       transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
     }
 
-    .check-row {
+    .toggle-row {
       display: flex;
       align-items: center;
-      gap: 9px;
-      margin: 10px 0 0;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 13px;
       font-size: 0.86rem;
       font-weight: 500;
       color: var(--ink-700);
       cursor: pointer;
     }
 
-    .check-row input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
-      accent-color: var(--brand);
-      cursor: pointer;
+    .switch {
+      position: relative;
+      width: 42px;
+      height: 23px;
+      flex-shrink: 0;
+      display: inline-block;
     }
 
-    .check-grid {
+    .switch input {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .switch .knob {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: #c7d1e2;
+      transition: background 0.2s ease;
+    }
+
+    .switch .knob::before {
+      content: '';
+      position: absolute;
+      width: 17px;
+      height: 17px;
+      left: 3px;
+      top: 3px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.2s ease;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
+    .switch input:checked + .knob {
+      background: var(--brand);
+    }
+
+    .switch input:checked + .knob::before {
+      transform: translateX(19px);
+    }
+
+    .toggle-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 2px 16px;
-      margin-top: 4px;
+      gap: 0 28px;
+      margin-top: 2px;
+    }
+
+    .toggle-grid .toggle-row {
+      margin-top: 11px;
     }
 
     .sub-input {
-      margin-top: 8px;
-      margin-left: 25px;
-      width: calc(100% - 25px) !important;
+      margin-top: 9px;
+      width: 100% !important;
     }
 
     .group-label {
@@ -303,8 +344,11 @@
 </head>
 <body>
   <main class="page-shell">
-    <h1>Gerrit Jira Tools 옵션</h1>
-    <p class="subtitle">Jira 연결 정보와 댓글 템플릿을 설정합니다.</p>
+    <h1>설정</h1>
+    <p class="subtitle">
+      Gerrit Jira Tools의 계정 연결, 동작 방식, 댓글 템플릿을 관리합니다.<br>
+      변경 사항은 저장 즉시 모든 Gerrit 탭에 반영됩니다.
+    </p>
 
   <label for="email">Jira 이메일</label>
   <input
@@ -337,36 +381,42 @@
   <div class="section">
     <h2>동작 설정</h2>
 
-    <label class="check-row" for="opt-preview">
-      <input type="checkbox" id="opt-preview">
-      팝업에서 코멘트 생성/반영 처리 전 미리보기·수정
+    <label class="toggle-row" for="opt-preview">
+      <span>팝업에서 코멘트 생성/반영 처리 전 미리보기·수정</span>
+      <span class="switch"><input type="checkbox" id="opt-preview"><span class="knob"></span></span>
     </label>
 
-    <label class="check-row" for="opt-pill">
-      <input type="checkbox" id="opt-pill">
-      Gerrit 페이지에 이슈 상태 배지(pill) 표시
+    <label class="toggle-row" for="opt-pill">
+      <span>Gerrit 페이지에 이슈 상태 배지(pill) 표시</span>
+      <span class="switch"><input type="checkbox" id="opt-pill"><span class="knob"></span></span>
     </label>
 
-    <label class="check-row" for="opt-transition">
-      <input type="checkbox" id="opt-transition">
-      반영 처리 시 이슈 상태 전환
+    <label class="toggle-row" for="opt-transition">
+      <span>반영 처리 시 이슈 상태 전환</span>
+      <span class="switch"><input type="checkbox" id="opt-transition"><span class="knob"></span></span>
     </label>
     <input
       type="text"
       id="opt-transition-name"
       class="sub-input"
-      placeholder="전환할 상태 이름 (예: 검토 중)"
+      list="status-options"
+      placeholder="전환할 상태 선택 또는 직접 입력 (예: 검토 중)"
       spellcheck="false"
+      autocomplete="off"
     >
+    <datalist id="status-options"></datalist>
+    <div class="field-note">
+      연결 테스트가 성공한 계정이면 사이트의 상태 목록이 자동으로 제안됩니다.
+    </div>
 
     <div class="group-label">FAB 메뉴 버튼 구성</div>
-    <div class="check-grid">
-      <label class="check-row" for="fab-open-issue"><input type="checkbox" id="fab-open-issue"> 이슈 페이지 이동</label>
-      <label class="check-row" for="fab-lookup"><input type="checkbox" id="fab-lookup"> 이슈 조회</label>
-      <label class="check-row" for="fab-link"><input type="checkbox" id="fab-link"> 웹링크 추가</label>
-      <label class="check-row" for="fab-comment"><input type="checkbox" id="fab-comment"> 코멘트 생성</label>
-      <label class="check-row" for="fab-apply"><input type="checkbox" id="fab-apply"> 반영 처리</label>
-      <label class="check-row" for="fab-options"><input type="checkbox" id="fab-options"> 설정</label>
+    <div class="toggle-grid">
+      <label class="toggle-row" for="fab-open-issue"><span>이슈 페이지 이동</span><span class="switch"><input type="checkbox" id="fab-open-issue"><span class="knob"></span></span></label>
+      <label class="toggle-row" for="fab-lookup"><span>이슈 조회</span><span class="switch"><input type="checkbox" id="fab-lookup"><span class="knob"></span></span></label>
+      <label class="toggle-row" for="fab-link"><span>웹링크 추가</span><span class="switch"><input type="checkbox" id="fab-link"><span class="knob"></span></span></label>
+      <label class="toggle-row" for="fab-comment"><span>코멘트 생성</span><span class="switch"><input type="checkbox" id="fab-comment"><span class="knob"></span></span></label>
+      <label class="toggle-row" for="fab-apply"><span>반영 처리</span><span class="switch"><input type="checkbox" id="fab-apply"><span class="knob"></span></span></label>
+      <label class="toggle-row" for="fab-options"><span>설정</span><span class="switch"><input type="checkbox" id="fab-options"><span class="knob"></span></span></label>
     </div>
   </div>
 
