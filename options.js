@@ -155,7 +155,20 @@ btnTest.addEventListener('click', async () => {
   } else if (result.status === 200) {
     setStatus('연결 성공 (200 OK) — 인증이 정상입니다.', 'ok');
   } else if (result.status === 401) {
-    setStatus('인증 실패 (401) — 이메일 또는 토큰을 확인하세요.', 'err');
+    const lines = ['인증 실패 (401) — 이메일 또는 토큰을 확인하세요.'];
+    if (result.reason === 'EMPTY_INPUT') {
+      lines.push('이메일 또는 토큰이 비어 있는 상태로 전송되었습니다.');
+    } else {
+      lines.push(`전송된 값: 이메일 ${result.emailLength}자 / 토큰 ${result.tokenLength}자`);
+      if (result.reason) lines.push(`서버 사유: ${result.reason}`);
+    }
+    if (result.denied) {
+      lines.push(`추가 사유: ${result.denied} — CAPTCHA 잠금일 수 있습니다. 브라우저에서 Jira에 로그인한 뒤 다시 시도하세요.`);
+    }
+    if (result.headerNames) {
+      lines.push(`응답 헤더: ${result.headerNames}`);
+    }
+    setStatus(lines.join('\n'), 'err');
   } else if (result.status === 403) {
     setStatus('권한 부족 (403) — 계정에 API 접근 권한이 없습니다.', 'err');
   } else {

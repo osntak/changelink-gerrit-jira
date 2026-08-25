@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gerrit Jira Tools",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Gerrit change 페이지에서 Jira 이슈 조회/웹링크 추가/코멘트 생성을 수행합니다.",
   "permissions": [
     "storage",

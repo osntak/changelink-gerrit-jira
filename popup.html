@@ -53,17 +53,17 @@
       gap: 8px;
     }
 
-    .icon-btn {
-      width: 28px;
+    .options-btn {
       height: 28px;
       border: 1px solid var(--line);
       border-radius: 7px;
       background: #fff;
       color: var(--sub);
-      font-size: 15px;
+      font-size: 12px;
       line-height: 1;
       cursor: pointer;
-      padding: 0;
+      padding: 0 10px;
+      font-weight: 600;
     }
 
     .kv {
@@ -231,6 +231,28 @@
       white-space: pre-line;
     }
 
+    .transition-row {
+      margin-top: 8px;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .transition-row select {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 6px 8px;
+      font-size: 12px;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    .transition-row button {
+      flex-shrink: 0;
+    }
+
     .status.ok { background: #e8f5e9; color: var(--ok); }
     .status.err { background: #ffebee; color: var(--err); }
     .status.warn { background: #fff3e0; color: var(--warn); }
@@ -241,7 +263,7 @@
     <section class="panel">
       <div class="head-row">
         <h1>Gerrit Jira Tools</h1>
-        <button id="btn-options" class="icon-btn" title="옵션 열기" aria-label="옵션 열기">⚙</button>
+        <button id="btn-options" class="options-btn" title="설정 열기" aria-label="설정 열기">⚙ 설정</button>
       </div>
       <div class="kv">
         <div>Subject</div>
@@ -265,6 +287,7 @@
 
       <div class="btn-row">
         <button id="btn-refresh" class="primary">이슈 조회 / 새로고침</button>
+        <button id="btn-apply">⚡ 반영 처리 (웹링크+코멘트)</button>
         <button id="btn-link">웹링크 추가</button>
         <button id="btn-comment">코멘트 생성</button>
       </div>
@@ -281,6 +304,12 @@
         <div id="issue-summary" class="title"></div>
         <div id="issue-status"></div>
         <div id="issue-assignee"></div>
+        <div class="transition-row">
+          <select id="transition-select" aria-label="변경할 상태 선택">
+            <option value="">상태 변경...</option>
+          </select>
+          <button id="btn-transition" disabled>변경</button>
+        </div>
       </div>
     </section>
 

@@ -7,9 +7,8 @@
 const MSG = self.MESSAGE_TYPES;
 const FAB_ROOT_ID = 'gj-fab-root';
 const ISSUE_DIALOG_ID = '__gj_issue_dialog__';
-const FAB_SCHEMA_VERSION = '2';
-const NETWORK_HOOK_SCRIPT_ID = '__gj_network_hook__';
-const NETWORK_CONTEXT_EVENT_TYPE = 'GJ_NETWORK_CONTEXT';
+const FAB_SCHEMA_VERSION = '3';
+const FAB_POSITION_KEY = 'fabPosition';
 
 let networkContextCache = {
   issueKey: null,
@@ -453,12 +452,6 @@ function extractContext() {
   };
 }
 
-function initNetworkContextBridge() {
-  // Disabled: inline/page script injection is blocked by Gerrit CSP.
-  // Keep this as a no-op to avoid runtime CSP errors.
-  return;
-}
-
 function hasIssueKey(context) {
   return !!context?.issueKey;
 }
@@ -740,10 +733,26 @@ async function handleFabAddRemoteLink() {
   }
 }
 
+async function requestAddComment() {
+  const resp = await sendRuntimeMessage({ type: MSG.POPUP_ADD_COMMENT });
+  if (resp?.duplicate) {
+    const proceed = window.confirm(
+      `${resp.issueKey}에 이 change의 코멘트가 이미 있습니다.\n그래도 새 코멘트를 생성할까요?`,
+    );
+    if (!proceed) return { ok: false, cancelled: true };
+    return sendRuntimeMessage({ type: MSG.POPUP_ADD_COMMENT, force: true });
+  }
+  return resp;
+}
+
 async function handleFabAddComment() {
   showToast('코멘트 생성 중...', 'info');
   try {
-    const resp = await sendRuntimeMessage({ type: MSG.POPUP_ADD_COMMENT });
+    const resp = await requestAddComment();
+    if (resp?.cancelled) {
+      showToast('코멘트 생성을 취소했습니다.', 'info');
+      return;
+    }
     if (!resp?.ok) {
       showToast(resp?.message || '코멘트 생성에 실패했습니다.', 'error');
       return;
@@ -751,6 +760,38 @@ async function handleFabAddComment() {
     showToast(`코멘트 생성 완료: ${resp.issueKey || ''}`.trim(), 'success');
   } catch {
     showToast('요청 중 오류가 발생했습니다.', 'error');
+  }
+}
+
+async function handleFabQuickApply() {
+  showToast('반영 처리 중... (웹링크 + 코멘트)', 'info');
+  try {
+    const linkResp = await sendRuntimeMessage({ type: MSG.POPUP_ADD_REMOTE_LINK });
+    if (!linkResp?.ok) {
+      showToast(linkResp?.message || '웹링크 추가에 실패했습니다.', 'error');
+      return;
+    }
+
+    const commentResp = await requestAddComment();
+    if (commentResp?.cancelled) {
+      showToast(`웹링크만 추가했습니다: ${linkResp.issueKey || ''}`.trim(), 'warn');
+      return;
+    }
+    if (!commentResp?.ok) {
+      showToast(`웹링크는 추가됨. 코멘트 실패: ${commentResp?.message || ''}`.trim(), 'error');
+      return;
+    }
+    showToast(`반영 처리 완료: ${commentResp.issueKey || ''}`.trim(), 'success');
+  } catch {
+    showToast('요청 중 오류가 발생했습니다.', 'error');
+  }
+}
+
+async function handleFabOpenOptions() {
+  try {
+    await sendRuntimeMessage({ type: MSG.OPEN_OPTIONS });
+  } catch {
+    showToast('설정 페이지를 열 수 없습니다.', 'error');
   }
 }
 
@@ -801,6 +842,103 @@ function buildFabActionButton({ id, icon, title, onClick, iconSvg }) {
   return btn;
 }
 
+// -- FAB position (drag & persist) ---------------------------------------------
+
+let fabResizeHandler = null;
+
+function clampFabPosition(left, top, rootRect) {
+  const margin = 8;
+  const maxLeft = window.innerWidth - rootRect.width - margin;
+  const maxTop = window.innerHeight - rootRect.height - margin;
+  return {
+    left: Math.min(Math.max(left, margin), Math.max(maxLeft, margin)),
+    top: Math.min(Math.max(top, margin), Math.max(maxTop, margin)),
+  };
+}
+
+function applyFabPosition(root, pos) {
+  if (!pos || !Number.isFinite(pos.left) || !Number.isFinite(pos.top)) return;
+  const rect = root.getBoundingClientRect();
+  const clamped = clampFabPosition(pos.left, pos.top, rect);
+  root.style.left = `${clamped.left}px`;
+  root.style.top = `${clamped.top}px`;
+  root.style.right = 'auto';
+  root.style.bottom = 'auto';
+}
+
+function restoreFabPosition(root) {
+  chrome.storage.local.get([FAB_POSITION_KEY], (data) => {
+    applyFabPosition(root, data[FAB_POSITION_KEY]);
+  });
+}
+
+function saveFabPosition(left, top) {
+  chrome.storage.local.set({ [FAB_POSITION_KEY]: { left, top } });
+}
+
+function makeFabDraggable(root, mainButton) {
+  const DRAG_THRESHOLD = 5;
+  let dragState = null;
+  let suppressClick = false;
+
+  mainButton.style.touchAction = 'none';
+
+  mainButton.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const rect = root.getBoundingClientRect();
+    dragState = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originLeft: rect.left,
+      originTop: rect.top,
+      moved: false,
+    };
+  });
+
+  mainButton.addEventListener('pointermove', (e) => {
+    if (!dragState || e.pointerId !== dragState.pointerId) return;
+    const dx = e.clientX - dragState.startX;
+    const dy = e.clientY - dragState.startY;
+
+    if (!dragState.moved) {
+      if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+      dragState.moved = true;
+      closeFabMenu();
+      try { mainButton.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
+
+    applyFabPosition(root, {
+      left: dragState.originLeft + dx,
+      top: dragState.originTop + dy,
+    });
+  });
+
+  const endDrag = (e) => {
+    if (!dragState || e.pointerId !== dragState.pointerId) return;
+    if (dragState.moved) {
+      suppressClick = true;
+      const rect = root.getBoundingClientRect();
+      saveFabPosition(rect.left, rect.top);
+      try { mainButton.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
+    dragState = null;
+  };
+
+  mainButton.addEventListener('pointerup', endDrag);
+  mainButton.addEventListener('pointercancel', () => {
+    dragState = null;
+  });
+
+  return {
+    consumeSuppressedClick() {
+      if (!suppressClick) return false;
+      suppressClick = false;
+      return true;
+    },
+  };
+}
+
 function renderFab() {
   const existing = document.getElementById(FAB_ROOT_ID);
   if (existing) {
@@ -808,6 +946,10 @@ function renderFab() {
     const hasOpenIssueButton = !!existing.querySelector('#gj-fab-open-issue');
     if (sameVersion && hasOpenIssueButton) return;
     existing.remove();
+    if (fabResizeHandler) {
+      window.removeEventListener('resize', fabResizeHandler);
+      fabResizeHandler = null;
+    }
   }
 
   const root = document.createElement('div');
@@ -863,6 +1005,20 @@ function renderFab() {
     onClick: handleFabAddComment,
   }));
 
+  menu.appendChild(buildFabActionButton({
+    id: 'gj-fab-apply',
+    icon: '⚡',
+    title: '반영 처리 (웹링크+코멘트)',
+    onClick: handleFabQuickApply,
+  }));
+
+  menu.appendChild(buildFabActionButton({
+    id: 'gj-fab-options',
+    icon: '⚙️',
+    title: '설정',
+    onClick: handleFabOpenOptions,
+  }));
+
   const mainButton = document.createElement('button');
   mainButton.id = 'gj-fab-main';
   mainButton.type = 'button';
@@ -883,8 +1039,11 @@ function renderFab() {
     transition: 'transform 0.16s ease, box-shadow 0.16s ease',
   });
 
+  const dragController = makeFabDraggable(root, mainButton);
+
   mainButton.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (dragController.consumeSuppressedClick()) return;
     if (isFabMenuOpen()) closeFabMenu();
     else openFabMenu();
   });
@@ -892,6 +1051,13 @@ function renderFab() {
   root.appendChild(menu);
   root.appendChild(mainButton);
   document.body.appendChild(root);
+  restoreFabPosition(root);
+
+  fabResizeHandler = () => {
+    const rect = root.getBoundingClientRect();
+    if (root.style.left) applyFabPosition(root, { left: rect.left, top: rect.top });
+  };
+  window.addEventListener('resize', fabResizeHandler);
 
   fabDocClickHandler = (e) => {
     if (!root.contains(e.target)) closeFabMenu();
@@ -907,6 +1073,11 @@ function removeFab() {
   if (fabDocClickHandler) {
     document.removeEventListener('click', fabDocClickHandler, true);
     fabDocClickHandler = null;
+  }
+
+  if (fabResizeHandler) {
+    window.removeEventListener('resize', fabResizeHandler);
+    fabResizeHandler = null;
   }
 }
 
@@ -951,4 +1122,3 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 initFabFromStorage();
-initNetworkContextBridge();
