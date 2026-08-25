@@ -8,7 +8,7 @@ const MSG = self.MESSAGE_TYPES;
 const FAB_ROOT_ID = 'gj-fab-root';
 const ISSUE_DIALOG_ID = '__gj_issue_dialog__';
 const STATUS_PILL_ID = 'gj-fab-status-pill';
-const FAB_SCHEMA_VERSION = '4';
+const FAB_SCHEMA_VERSION = '5';
 const FAB_POSITION_KEY = 'fabPosition';
 
 const DEFAULT_FAB_ACTIONS = {
@@ -989,6 +989,17 @@ function makeFabDraggable(root, mainButton) {
 
   mainButton.style.touchAction = 'none';
 
+  const finishDrag = (pointerId) => {
+    if (!dragState) return;
+    if (dragState.moved) {
+      suppressClick = true;
+      const rect = root.getBoundingClientRect();
+      saveFabPosition(rect.left, rect.top);
+    }
+    try { mainButton.releasePointerCapture(pointerId); } catch { /* ignore */ }
+    dragState = null;
+  };
+
   mainButton.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     const rect = root.getBoundingClientRect();
@@ -1000,10 +1011,21 @@ function makeFabDraggable(root, mainButton) {
       originTop: rect.top,
       moved: false,
     };
+    // Capture immediately so pointerup is always delivered to this button,
+    // even when released outside of it — otherwise the drag state leaks and
+    // the FAB keeps following the cursor.
+    try { mainButton.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   });
 
   mainButton.addEventListener('pointermove', (e) => {
     if (!dragState || e.pointerId !== dragState.pointerId) return;
+
+    // Safety net: if no button is pressed anymore, the pointerup was missed.
+    if (e.buttons === 0) {
+      finishDrag(e.pointerId);
+      return;
+    }
+
     const dx = e.clientX - dragState.startX;
     const dy = e.clientY - dragState.startY;
 
@@ -1011,7 +1033,6 @@ function makeFabDraggable(root, mainButton) {
       if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
       dragState.moved = true;
       closeFabMenu();
-      try { mainButton.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     }
 
     applyFabPosition(root, {
@@ -1022,18 +1043,13 @@ function makeFabDraggable(root, mainButton) {
 
   const endDrag = (e) => {
     if (!dragState || e.pointerId !== dragState.pointerId) return;
-    if (dragState.moved) {
-      suppressClick = true;
-      const rect = root.getBoundingClientRect();
-      saveFabPosition(rect.left, rect.top);
-      try { mainButton.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    }
-    dragState = null;
+    finishDrag(e.pointerId);
   };
 
   mainButton.addEventListener('pointerup', endDrag);
-  mainButton.addEventListener('pointercancel', () => {
-    dragState = null;
+  mainButton.addEventListener('pointercancel', endDrag);
+  window.addEventListener('blur', () => {
+    if (dragState) finishDrag(dragState.pointerId);
   });
 
   return {
@@ -1073,8 +1089,14 @@ function renderFab() {
   const menu = document.createElement('div');
   menu.id = 'gj-fab-menu';
   Object.assign(menu.style, {
+    // Absolutely positioned so the hidden menu takes no layout space —
+    // otherwise the status pill floats far above the main button.
+    position: 'absolute',
+    right: '0',
+    bottom: 'calc(100% + 8px)',
     display: 'grid',
     gap: '8px',
+    justifyItems: 'end',
     opacity: '0',
     transform: 'translateY(6px)',
     pointerEvents: 'none',
