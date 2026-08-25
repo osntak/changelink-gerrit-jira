@@ -19,6 +19,20 @@ const btnSave    = document.getElementById('btn-save');
 const btnTest    = document.getElementById('btn-test');
 const btnReset   = document.getElementById('btn-reset');
 
+const optPreviewEl        = /** @type {HTMLInputElement} */ (document.getElementById('opt-preview'));
+const optPillEl           = /** @type {HTMLInputElement} */ (document.getElementById('opt-pill'));
+const optTransitionEl     = /** @type {HTMLInputElement} */ (document.getElementById('opt-transition'));
+const optTransitionNameEl = /** @type {HTMLInputElement} */ (document.getElementById('opt-transition-name'));
+
+const FAB_ACTION_INPUTS = {
+  openIssue: /** @type {HTMLInputElement} */ (document.getElementById('fab-open-issue')),
+  lookup:    /** @type {HTMLInputElement} */ (document.getElementById('fab-lookup')),
+  link:      /** @type {HTMLInputElement} */ (document.getElementById('fab-link')),
+  comment:   /** @type {HTMLInputElement} */ (document.getElementById('fab-comment')),
+  apply:     /** @type {HTMLInputElement} */ (document.getElementById('fab-apply')),
+  options:   /** @type {HTMLInputElement} */ (document.getElementById('fab-options')),
+};
+
 // Must match DEFAULT_TEMPLATE in service_worker.js
 const DEFAULT_TEMPLATE =
 `{title}
@@ -48,12 +62,30 @@ function setStatus(msg, cls, autoClearMs) {
 // ── Load saved values on page open ───────────────────────────────────────────
 
 chrome.storage.local.get(
-  ['jiraEmail', 'jiraToken', 'commentTemplate'],
-  ({ jiraEmail, jiraToken, commentTemplate }) => {
+  [
+    'jiraEmail', 'jiraToken', 'commentTemplate',
+    'previewEnabled', 'showStatusPill',
+    'applyTransitionEnabled', 'applyTransitionName', 'fabActions',
+  ],
+  ({
+    jiraEmail, jiraToken, commentTemplate,
+    previewEnabled, showStatusPill,
+    applyTransitionEnabled, applyTransitionName, fabActions,
+  }) => {
     if (jiraEmail) emailEl.value = jiraEmail;
     if (jiraToken) tokenEl.value = jiraToken;
     // Show saved template; initialize with default when not set yet.
     templateEl.value = commentTemplate ?? DEFAULT_TEMPLATE;
+
+    optPreviewEl.checked = previewEnabled !== false;
+    optPillEl.checked = showStatusPill !== false;
+    optTransitionEl.checked = !!applyTransitionEnabled;
+    optTransitionNameEl.value = applyTransitionName || '';
+
+    const actions = fabActions || {};
+    for (const [key, el] of Object.entries(FAB_ACTION_INPUTS)) {
+      el.checked = actions[key] !== false;
+    }
   },
 );
 
@@ -76,7 +108,19 @@ btnSave.addEventListener('click', () => {
   // commentTemplate: empty string means "use default" (service worker handles this)
   const templateVal = templateEl.value; // preserve as-is, including empty
 
-  const payload = { commentTemplate: templateVal };
+  const fabActions = {};
+  for (const [key, el] of Object.entries(FAB_ACTION_INPUTS)) {
+    fabActions[key] = el.checked;
+  }
+
+  const payload = {
+    commentTemplate: templateVal,
+    previewEnabled: optPreviewEl.checked,
+    showStatusPill: optPillEl.checked,
+    applyTransitionEnabled: optTransitionEl.checked,
+    applyTransitionName: optTransitionNameEl.value.trim(),
+    fabActions,
+  };
   if (email && token) {
     payload.jiraEmail = email;
     payload.jiraToken = token;

@@ -7,8 +7,23 @@
 const MSG = self.MESSAGE_TYPES;
 const FAB_ROOT_ID = 'gj-fab-root';
 const ISSUE_DIALOG_ID = '__gj_issue_dialog__';
-const FAB_SCHEMA_VERSION = '3';
+const STATUS_PILL_ID = 'gj-fab-status-pill';
+const FAB_SCHEMA_VERSION = '4';
 const FAB_POSITION_KEY = 'fabPosition';
+
+const DEFAULT_FAB_ACTIONS = {
+  openIssue: true,
+  lookup: true,
+  link: true,
+  comment: true,
+  apply: true,
+  options: true,
+};
+
+let fabSettingsCache = {
+  fabActions: { ...DEFAULT_FAB_ACTIONS },
+  showStatusPill: true,
+};
 
 let networkContextCache = {
   issueKey: null,
@@ -531,7 +546,7 @@ const TOAST_COLORS = {
   info: '#1565c0',
 };
 
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', action) {
   const existing = document.getElementById('__gjc_toast__');
   if (existing) existing.remove();
 
@@ -560,13 +575,53 @@ function showToast(message, type = 'info') {
     userSelect: 'none',
   });
 
-  toast.textContent = message;
+  const msgSpan = document.createElement('span');
+  msgSpan.textContent = message;
+  toast.appendChild(msgSpan);
+
+  if (action && action.label && typeof action.onClick === 'function') {
+    const actionBtn = document.createElement('button');
+    actionBtn.textContent = action.label;
+    Object.assign(actionBtn.style, {
+      marginLeft: '12px',
+      border: '1px solid rgba(255,255,255,0.65)',
+      background: 'transparent',
+      color: '#fff',
+      borderRadius: '5px',
+      padding: '3px 10px',
+      fontSize: '12px',
+      fontWeight: '700',
+      cursor: 'pointer',
+      verticalAlign: 'middle',
+    });
+    actionBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      action.onClick();
+      toast.remove();
+    });
+    toast.appendChild(actionBtn);
+    toast.style.userSelect = 'auto';
+    toast.style.pointerEvents = 'auto';
+  }
+
   document.body.appendChild(toast);
 
+  const lifetime = action ? 8000 : 4500;
   setTimeout(() => {
     toast.style.opacity = '0';
     setTimeout(() => toast.remove(), 320);
-  }, 4500);
+  }, lifetime);
+}
+
+function issueOpenAction(issueKey) {
+  const key = normalizeIssueKey(issueKey);
+  if (!key) return undefined;
+  return {
+    label: '이슈 열기',
+    onClick: () => {
+      window.open(`${JIRA_BASE}/browse/${encodeURIComponent(key)}`, '_blank', 'noopener,noreferrer');
+    },
+  };
 }
 
 // -- Runtime messaging ---------------------------------------------------------
@@ -757,31 +812,32 @@ async function handleFabAddComment() {
       showToast(resp?.message || '코멘트 생성에 실패했습니다.', 'error');
       return;
     }
-    showToast(`코멘트 생성 완료: ${resp.issueKey || ''}`.trim(), 'success');
+    showToast(`코멘트 생성 완료: ${resp.issueKey || ''}`.trim(), 'success', issueOpenAction(resp.issueKey));
   } catch {
     showToast('요청 중 오류가 발생했습니다.', 'error');
   }
 }
 
 async function handleFabQuickApply() {
-  showToast('반영 처리 중... (웹링크 + 코멘트)', 'info');
+  showToast('반영 처리 중...', 'info');
   try {
-    const linkResp = await sendRuntimeMessage({ type: MSG.POPUP_ADD_REMOTE_LINK });
-    if (!linkResp?.ok) {
-      showToast(linkResp?.message || '웹링크 추가에 실패했습니다.', 'error');
-      return;
+    let resp = await sendRuntimeMessage({ type: MSG.POPUP_QUICK_APPLY });
+    if (resp?.duplicate) {
+      const proceed = window.confirm(
+        `${resp.issueKey}에 이 change의 코멘트가 이미 있습니다.\n그래도 반영 처리(웹링크+코멘트)를 진행할까요?`,
+      );
+      if (!proceed) {
+        showToast('반영 처리를 취소했습니다.', 'info');
+        return;
+      }
+      resp = await sendRuntimeMessage({ type: MSG.POPUP_QUICK_APPLY, force: true });
     }
 
-    const commentResp = await requestAddComment();
-    if (commentResp?.cancelled) {
-      showToast(`웹링크만 추가했습니다: ${linkResp.issueKey || ''}`.trim(), 'warn');
+    if (!resp?.ok) {
+      showToast(resp?.message || '반영 처리에 실패했습니다.', 'error');
       return;
     }
-    if (!commentResp?.ok) {
-      showToast(`웹링크는 추가됨. 코멘트 실패: ${commentResp?.message || ''}`.trim(), 'error');
-      return;
-    }
-    showToast(`반영 처리 완료: ${commentResp.issueKey || ''}`.trim(), 'success');
+    showToast(resp.message || `반영 처리 완료: ${resp.issueKey || ''}`.trim(), 'success', issueOpenAction(resp.issueKey));
   } catch {
     showToast('요청 중 오류가 발생했습니다.', 'error');
   }
@@ -812,25 +868,43 @@ function buildFabActionButton({ id, icon, title, onClick, iconSvg }) {
   btn.type = 'button';
   btn.title = title;
   btn.setAttribute('aria-label', title);
+
+  const iconSpan = document.createElement('span');
   if (iconSvg) {
-    btn.innerHTML = iconSvg;
+    iconSpan.innerHTML = iconSvg;
+    Object.assign(iconSpan.style, { display: 'inline-flex', alignItems: 'center' });
   } else {
-    btn.textContent = icon;
+    iconSpan.textContent = icon;
+    iconSpan.style.fontSize = '15px';
   }
 
+  const labelSpan = document.createElement('span');
+  labelSpan.textContent = title;
+  Object.assign(labelSpan.style, {
+    fontSize: '12.5px',
+    fontWeight: '600',
+    whiteSpace: 'nowrap',
+  });
+
+  btn.appendChild(iconSpan);
+  btn.appendChild(labelSpan);
+
   Object.assign(btn.style, {
-    width: '42px',
-    height: '42px',
-    borderRadius: '21px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    height: '38px',
+    padding: '0 14px',
+    borderRadius: '19px',
     border: 'none',
     background: '#fff',
     color: '#1d2b3f',
-    fontSize: '19px',
     cursor: 'pointer',
     boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
     opacity: '0',
     transform: 'translateY(6px) scale(0.94)',
     transition: 'opacity 0.16s ease, transform 0.18s ease',
+    justifySelf: 'end',
   });
 
   btn.addEventListener('click', async (e) => {
@@ -841,6 +915,21 @@ function buildFabActionButton({ id, icon, title, onClick, iconSvg }) {
 
   return btn;
 }
+
+const FAB_ACTION_DEFS = [
+  {
+    key: 'openIssue',
+    id: 'gj-fab-open-issue',
+    iconSvg: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7"></path><path d="M10 14 21 3"></path><path d="M21 14v7h-7"></path><path d="M3 10v11h11"></path></svg>',
+    title: '이슈 페이지 이동',
+    onClick: () => openJiraIssueInNewTab(),
+  },
+  { key: 'lookup', id: 'gj-fab-issue', icon: '🔍', title: '이슈 조회', onClick: () => handleFabIssueLookup() },
+  { key: 'link', id: 'gj-fab-link', icon: '🔗', title: '웹링크 추가', onClick: () => handleFabAddRemoteLink() },
+  { key: 'comment', id: 'gj-fab-comment', icon: '💬', title: '코멘트 생성', onClick: () => handleFabAddComment() },
+  { key: 'apply', id: 'gj-fab-apply', icon: '⚡', title: '반영 처리', onClick: () => handleFabQuickApply() },
+  { key: 'options', id: 'gj-fab-options', icon: '⚙️', title: '설정', onClick: () => handleFabOpenOptions() },
+];
 
 // -- FAB position (drag & persist) ---------------------------------------------
 
@@ -942,9 +1031,7 @@ function makeFabDraggable(root, mainButton) {
 function renderFab() {
   const existing = document.getElementById(FAB_ROOT_ID);
   if (existing) {
-    const sameVersion = existing.getAttribute('data-fab-version') === FAB_SCHEMA_VERSION;
-    const hasOpenIssueButton = !!existing.querySelector('#gj-fab-open-issue');
-    if (sameVersion && hasOpenIssueButton) return;
+    if (existing.getAttribute('data-fab-version') === FAB_SCHEMA_VERSION) return;
     existing.remove();
     if (fabResizeHandler) {
       window.removeEventListener('resize', fabResizeHandler);
@@ -977,47 +1064,11 @@ function renderFab() {
     transition: 'opacity 0.16s ease, transform 0.18s ease',
   });
 
-  menu.appendChild(buildFabActionButton({
-    id: 'gj-fab-open-issue',
-    iconSvg: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7"></path><path d="M10 14 21 3"></path><path d="M21 14v7h-7"></path><path d="M3 10v11h11"></path></svg>',
-    title: '이슈 페이지 이동',
-    onClick: openJiraIssueInNewTab,
-  }));
-
-  menu.appendChild(buildFabActionButton({
-    id: 'gj-fab-issue',
-    icon: '🔍',
-    title: '이슈 조회',
-    onClick: handleFabIssueLookup,
-  }));
-
-  menu.appendChild(buildFabActionButton({
-    id: 'gj-fab-link',
-    icon: '🔗',
-    title: '웹링크 추가',
-    onClick: handleFabAddRemoteLink,
-  }));
-
-  menu.appendChild(buildFabActionButton({
-    id: 'gj-fab-comment',
-    icon: '💬',
-    title: '코멘트 생성',
-    onClick: handleFabAddComment,
-  }));
-
-  menu.appendChild(buildFabActionButton({
-    id: 'gj-fab-apply',
-    icon: '⚡',
-    title: '반영 처리 (웹링크+코멘트)',
-    onClick: handleFabQuickApply,
-  }));
-
-  menu.appendChild(buildFabActionButton({
-    id: 'gj-fab-options',
-    icon: '⚙️',
-    title: '설정',
-    onClick: handleFabOpenOptions,
-  }));
+  const enabledActions = fabSettingsCache.fabActions || DEFAULT_FAB_ACTIONS;
+  for (const def of FAB_ACTION_DEFS) {
+    if (enabledActions[def.key] === false) continue;
+    menu.appendChild(buildFabActionButton(def));
+  }
 
   const mainButton = document.createElement('button');
   mainButton.id = 'gj-fab-main';
@@ -1052,6 +1103,7 @@ function renderFab() {
   root.appendChild(mainButton);
   document.body.appendChild(root);
   restoreFabPosition(root);
+  refreshFabIssueState();
 
   fabResizeHandler = () => {
     const rect = root.getBoundingClientRect();
@@ -1064,6 +1116,133 @@ function renderFab() {
   };
   document.addEventListener('click', fabDocClickHandler, true);
 }
+
+// -- Issue detection state + status pill ----------------------------------------
+
+let lastPillIssueKey = null;
+
+function isChangePage() {
+  return /\/c\/.+\/\+\/\d+/.test(window.location.pathname);
+}
+
+function setFabMainState(detected) {
+  const main = document.getElementById('gj-fab-main');
+  if (!main) return;
+  main.style.background = detected ? '#1565c0' : '#8a94a6';
+  main.title = detected ? 'Jira 빠른 액션' : 'Jira 이슈키 미감지 (커밋 메시지에 jira: KEY 필요)';
+}
+
+function ensureStatusPill(root, issueKey) {
+  let pill = document.getElementById(STATUS_PILL_ID);
+  if (!pill) {
+    pill = document.createElement('button');
+    pill.id = STATUS_PILL_ID;
+    pill.type = 'button';
+    pill.title = 'Jira 이슈 열기';
+    Object.assign(pill.style, {
+      justifySelf: 'end',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      height: '26px',
+      padding: '0 11px',
+      borderRadius: '13px',
+      border: '1px solid rgba(21,101,192,0.35)',
+      background: 'rgba(255,255,255,0.96)',
+      color: '#1565c0',
+      fontSize: '11.5px',
+      fontWeight: '700',
+      cursor: 'pointer',
+      boxShadow: '0 3px 10px rgba(0,0,0,0.18)',
+      whiteSpace: 'nowrap',
+    });
+    pill.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = pill.getAttribute('data-issue-key');
+      if (key) {
+        window.open(`${JIRA_BASE}/browse/${encodeURIComponent(key)}`, '_blank', 'noopener,noreferrer');
+      }
+    });
+    root.insertBefore(pill, root.firstChild);
+  }
+  pill.setAttribute('data-issue-key', issueKey);
+  return pill;
+}
+
+function removeStatusPill() {
+  const pill = document.getElementById(STATUS_PILL_ID);
+  if (pill) pill.remove();
+  lastPillIssueKey = null;
+}
+
+async function refreshFabIssueState() {
+  const root = document.getElementById(FAB_ROOT_ID);
+  if (!root) return;
+
+  const ctx = extractContext();
+  const issueKey = normalizeIssueKey(ctx.issueKey);
+  setFabMainState(!!issueKey);
+
+  const pillEnabled = fabSettingsCache.showStatusPill !== false;
+  if (!issueKey || !pillEnabled || !isChangePage()) {
+    removeStatusPill();
+    return;
+  }
+  if (lastPillIssueKey === issueKey && document.getElementById(STATUS_PILL_ID)) return;
+
+  lastPillIssueKey = issueKey;
+  const pill = ensureStatusPill(root, issueKey);
+  pill.textContent = issueKey;
+
+  try {
+    const resp = await sendRuntimeMessage({ type: MSG.POPUP_GET_ISSUE, issueKey });
+    // Pill may have been removed or retargeted while the request was in flight.
+    const current = document.getElementById(STATUS_PILL_ID);
+    if (!current || current.getAttribute('data-issue-key') !== issueKey) return;
+    if (resp?.ok && resp.issue?.status) {
+      current.textContent = `${issueKey} · ${resp.issue.status}`;
+    }
+  } catch {
+    // Keep bare issue key on lookup failure (e.g., credentials not configured).
+  }
+}
+
+// SPA navigation: Gerrit swaps changes without a page reload. Reset the
+// network context cache when the change number changes, then re-enrich.
+let lastWatchedHref = window.location.href;
+
+function resetNetworkContextCache() {
+  networkContextCache = {
+    issueKey: null,
+    subject: '',
+    branch: '',
+    body: '',
+    changeNum: '',
+    project: '',
+    owner: '',
+    changeId: '',
+    submittedAt: '',
+  };
+}
+
+async function handleLocationChange() {
+  removeStatusPill();
+  resetNetworkContextCache();
+  if (!isChangePage()) {
+    setFabMainState(false);
+    return;
+  }
+  await fetchGerritDetailContext();
+  refreshFabIssueState();
+}
+
+setInterval(() => {
+  if (window.location.href === lastWatchedHref) return;
+  const prevChange = lastWatchedHref.match(/\/\+\/(\d+)/)?.[1] || '';
+  lastWatchedHref = window.location.href;
+  const nextChange = extractChangeNum();
+  if (prevChange !== nextChange) handleLocationChange();
+}, 1500);
 
 function removeFab() {
   closeFabMenu();
@@ -1087,10 +1266,24 @@ function applyFabEnabled(enabled) {
 }
 
 function initFabFromStorage() {
-  chrome.storage.local.get(['fabEnabled'], ({ fabEnabled }) => {
-    applyFabEnabled(fabEnabled !== false);
-  });
+  chrome.storage.local.get(
+    ['fabEnabled', 'fabActions', 'showStatusPill'],
+    ({ fabEnabled, fabActions, showStatusPill }) => {
+      fabSettingsCache = {
+        fabActions: { ...DEFAULT_FAB_ACTIONS, ...(fabActions || {}) },
+        showStatusPill: showStatusPill !== false,
+      };
+      applyFabEnabled(fabEnabled !== false);
+    },
+  );
 }
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (!changes.fabEnabled && !changes.fabActions && !changes.showStatusPill) return;
+  removeFab();
+  initFabFromStorage();
+});
 
 // -- Message listener ----------------------------------------------------------
 
@@ -1122,3 +1315,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 initFabFromStorage();
+
+// Enrich context from Gerrit detail API on initial load so the FAB state and
+// status pill reflect the current change without user interaction.
+if (isChangePage()) {
+  fetchGerritDetailContext().then(() => refreshFabIssueState());
+}
