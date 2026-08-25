@@ -643,15 +643,42 @@ function issueOpenAction(issueKey) {
 
 // -- Runtime messaging ---------------------------------------------------------
 
+// The extension can be reloaded/updated while this tab keeps running an
+// orphaned copy of the content script. Every chrome.* call then throws
+// "Extension context invalidated" — detect it and tear ourselves down.
+function extensionAlive() {
+  try {
+    return !!(chrome.runtime && chrome.runtime.id);
+  } catch {
+    return false;
+  }
+}
+
+function teardownOrphanedScript() {
+  try { clearInterval(urlWatchTimer); } catch { /* ignore */ }
+  try { removeFab(); } catch { /* ignore */ }
+  try { removeStatusPill(); } catch { /* ignore */ }
+}
+
 function sendRuntimeMessage(msg) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(msg, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(response);
-    });
+    if (!extensionAlive()) {
+      teardownOrphanedScript();
+      reject(new Error('extension context invalidated'));
+      return;
+    }
+    try {
+      chrome.runtime.sendMessage(msg, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      teardownOrphanedScript();
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 }
 
@@ -973,13 +1000,18 @@ function applyFabPosition(root, pos) {
 }
 
 function restoreFabPosition(root) {
-  chrome.storage.local.get([FAB_POSITION_KEY], (data) => {
-    applyFabPosition(root, data[FAB_POSITION_KEY]);
-  });
+  try {
+    chrome.storage.local.get([FAB_POSITION_KEY], (data) => {
+      if (chrome.runtime.lastError) return;
+      applyFabPosition(root, data[FAB_POSITION_KEY]);
+    });
+  } catch { /* orphaned script — position just not restored */ }
 }
 
 function saveFabPosition(left, top) {
-  chrome.storage.local.set({ [FAB_POSITION_KEY]: { left, top } });
+  try {
+    chrome.storage.local.set({ [FAB_POSITION_KEY]: { left, top } });
+  } catch { /* orphaned script — position just not saved */ }
 }
 
 function makeFabDraggable(root, mainButton) {
@@ -1275,7 +1307,11 @@ async function handleLocationChange() {
   refreshFabIssueState();
 }
 
-setInterval(() => {
+const urlWatchTimer = setInterval(() => {
+  if (!extensionAlive()) {
+    teardownOrphanedScript();
+    return;
+  }
   if (window.location.href === lastWatchedHref) return;
   const prevChange = lastWatchedHref.match(/\/\+\/(\d+)/)?.[1] || '';
   lastWatchedHref = window.location.href;
@@ -1305,16 +1341,21 @@ function applyFabEnabled(enabled) {
 }
 
 function initFabFromStorage() {
-  chrome.storage.local.get(
-    ['fabEnabled', 'fabActions', 'showStatusPill'],
-    ({ fabEnabled, fabActions, showStatusPill }) => {
-      fabSettingsCache = {
-        fabActions: { ...DEFAULT_FAB_ACTIONS, ...(fabActions || {}) },
-        showStatusPill: showStatusPill !== false,
-      };
-      applyFabEnabled(fabEnabled !== false);
-    },
-  );
+  try {
+    chrome.storage.local.get(
+      ['fabEnabled', 'fabActions', 'showStatusPill'],
+      ({ fabEnabled, fabActions, showStatusPill }) => {
+        if (chrome.runtime.lastError) return;
+        fabSettingsCache = {
+          fabActions: { ...DEFAULT_FAB_ACTIONS, ...(fabActions || {}) },
+          showStatusPill: showStatusPill !== false,
+        };
+        applyFabEnabled(fabEnabled !== false);
+      },
+    );
+  } catch {
+    teardownOrphanedScript();
+  }
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
