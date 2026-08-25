@@ -149,9 +149,15 @@
       margin-top: 11px;
     }
 
-    .sub-input {
-      margin-top: 9px;
-      width: 100% !important;
+    .toggle-row select {
+      max-width: 210px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      font-size: 0.84rem;
+      color: var(--ink-900);
+      background: var(--surface);
+      cursor: pointer;
     }
 
     .group-label {
@@ -391,22 +397,14 @@
       <span class="switch"><input type="checkbox" id="opt-pill"><span class="knob"></span></span>
     </label>
 
-    <label class="toggle-row" for="opt-transition">
+    <label class="toggle-row" for="opt-transition-name">
       <span>반영 처리 시 이슈 상태 전환</span>
-      <span class="switch"><input type="checkbox" id="opt-transition"><span class="knob"></span></span>
+      <select id="opt-transition-name">
+        <option value="">사용 안 함</option>
+      </select>
     </label>
-    <input
-      type="text"
-      id="opt-transition-name"
-      class="sub-input"
-      list="status-options"
-      placeholder="전환할 상태 선택 또는 직접 입력 (예: 검토 중)"
-      spellcheck="false"
-      autocomplete="off"
-    >
-    <datalist id="status-options"></datalist>
     <div class="field-note">
-      연결 테스트가 성공한 계정이면 사이트의 상태 목록이 자동으로 제안됩니다.
+      상태 목록은 저장된 Jira 계정에서 자동으로 불러옵니다.
     </div>
 
     <div class="group-label">FAB 메뉴 버튼 구성</div>

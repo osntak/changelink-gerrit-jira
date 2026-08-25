@@ -21,8 +21,7 @@ const btnReset   = document.getElementById('btn-reset');
 
 const optPreviewEl        = /** @type {HTMLInputElement} */ (document.getElementById('opt-preview'));
 const optPillEl           = /** @type {HTMLInputElement} */ (document.getElementById('opt-pill'));
-const optTransitionEl     = /** @type {HTMLInputElement} */ (document.getElementById('opt-transition'));
-const optTransitionNameEl = /** @type {HTMLInputElement} */ (document.getElementById('opt-transition-name'));
+const optTransitionNameEl = /** @type {HTMLSelectElement} */ (document.getElementById('opt-transition-name'));
 
 const FAB_ACTION_INPUTS = {
   openIssue: /** @type {HTMLInputElement} */ (document.getElementById('fab-open-issue')),
@@ -79,30 +78,44 @@ chrome.storage.local.get(
 
     optPreviewEl.checked = previewEnabled !== false;
     optPillEl.checked = showStatusPill !== false;
-    optTransitionEl.checked = !!applyTransitionEnabled;
-    optTransitionNameEl.value = applyTransitionName || '';
+
+    const savedTransition = applyTransitionEnabled ? String(applyTransitionName || '') : '';
+    setTransitionOptions(savedTransition ? [savedTransition] : [], savedTransition);
 
     const actions = fabActions || {};
     for (const [key, el] of Object.entries(FAB_ACTION_INPUTS)) {
       el.checked = actions[key] !== false;
     }
 
-    // Populate the status combo suggestions when credentials are available.
-    if (jiraEmail && jiraToken) loadStatusSuggestions();
+    // Populate the status combo from the Jira site when credentials exist.
+    if (jiraEmail && jiraToken) loadStatusOptions(savedTransition);
   },
 );
 
-function loadStatusSuggestions() {
+function setTransitionOptions(statuses, selected) {
+  optTransitionNameEl.innerHTML = '';
+  const offOption = document.createElement('option');
+  offOption.value = '';
+  offOption.textContent = '사용 안 함';
+  optTransitionNameEl.appendChild(offOption);
+
+  const names = [...new Set(statuses.filter(Boolean))];
+  if (selected && !names.includes(selected)) names.unshift(selected);
+
+  for (const name of names) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name;
+    optTransitionNameEl.appendChild(option);
+  }
+  optTransitionNameEl.value = selected || '';
+}
+
+function loadStatusOptions(selected) {
   chrome.runtime.sendMessage({ type: MSG.GET_JIRA_STATUSES }, (resp) => {
     if (chrome.runtime.lastError || !resp?.ok) return;
-    const datalist = document.getElementById('status-options');
-    if (!datalist) return;
-    datalist.innerHTML = '';
-    for (const name of resp.statuses || []) {
-      const option = document.createElement('option');
-      option.value = name;
-      datalist.appendChild(option);
-    }
+    const current = optTransitionNameEl.value || selected || '';
+    setTransitionOptions(resp.statuses || [], current);
   });
 }
 
@@ -130,12 +143,13 @@ btnSave.addEventListener('click', () => {
     fabActions[key] = el.checked;
   }
 
+  const transitionName = optTransitionNameEl.value.trim();
   const payload = {
     commentTemplate: templateVal,
     previewEnabled: optPreviewEl.checked,
     showStatusPill: optPillEl.checked,
-    applyTransitionEnabled: optTransitionEl.checked,
-    applyTransitionName: optTransitionNameEl.value.trim(),
+    applyTransitionEnabled: !!transitionName,
+    applyTransitionName: transitionName,
     fabActions,
   };
   if (email && token) {
