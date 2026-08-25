@@ -202,16 +202,17 @@ function formatDateMaybe(input) {
 }
 
 function renderTemplate(template, vars) {
+  // Function replacements so values containing `$&`/`$'` etc. are inserted literally.
   return template
-    .replace(/\{title\}/g, vars.title ?? '')
-    .replace(/\{body\}/g, vars.body ?? '')
-    .replace(/\{branch\}/g, vars.branch ?? '')
-    .replace(/\{change_num\}/g, vars.changeNum ?? '')
-    .replace(/\{change_id\}/g, vars.changeId ?? '')
-    .replace(/\{project\}/g, vars.project ?? '')
-    .replace(/\{owner\}/g, vars.owner ?? '')
-    .replace(/\{date\}/g, vars.date ?? '')
-    .replace(/\{url\}/g, vars.url ?? '')
+    .replace(/\{title\}/g, () => vars.title ?? '')
+    .replace(/\{body\}/g, () => vars.body ?? '')
+    .replace(/\{branch\}/g, () => vars.branch ?? '')
+    .replace(/\{change_num\}/g, () => vars.changeNum ?? '')
+    .replace(/\{change_id\}/g, () => vars.changeId ?? '')
+    .replace(/\{project\}/g, () => vars.project ?? '')
+    .replace(/\{owner\}/g, () => vars.owner ?? '')
+    .replace(/\{date\}/g, () => vars.date ?? '')
+    .replace(/\{url\}/g, () => vars.url ?? '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -236,7 +237,8 @@ function textToAdf(text, linkUrl) {
     .filter((p) => p.content.length > 0);
 
   if (paragraphs.length === 0) {
-    paragraphs.push({ type: 'paragraph', content: [{ type: 'text', text: '' }] });
+    // Empty text nodes are invalid ADF; an empty paragraph is accepted.
+    paragraphs.push({ type: 'paragraph', content: [] });
   }
 
   return { body: { type: 'doc', version: 1, content: paragraphs } };
@@ -284,6 +286,19 @@ function inlineNodesForLine(line, linkUrl) {
   return nodes;
 }
 
+async function readJiraErrorDetail(resp) {
+  try {
+    const json = await resp.json();
+    const messages = [
+      ...(Array.isArray(json?.errorMessages) ? json.errorMessages : []),
+      ...Object.values(json?.errors || {}),
+    ].map((m) => String(m)).filter(Boolean);
+    return messages.join('\n').slice(0, 300);
+  } catch {
+    return '';
+  }
+}
+
 function mapJiraError(status) {
   switch (status) {
     case 400: return '잘못된 요청 (400): 이슈 키 또는 요청 형식을 확인하세요.';
@@ -306,7 +321,8 @@ function mapClientError(err, fallbackMessage) {
     return '현재 페이지 URL이 허용된 Gerrit 도메인이 아닙니다.';
   }
   if (typeof err.status === 'number') {
-    return mapJiraError(err.status);
+    const base = mapJiraError(err.status);
+    return err.detail ? `${base}\n${err.detail}` : base;
   }
   if (err.code === 'network_error') {
     return '네트워크 오류가 발생했습니다. 인터넷 연결을 확인하세요.';
@@ -340,6 +356,9 @@ const jiraClient = {
         method: options.method || 'GET',
         headers,
         body: options.body ? JSON.stringify(options.body) : undefined,
+        // Never attach browser Jira session cookies: Atlassian prefers cookie
+        // sessions over Basic auth, so a stale session breaks token auth.
+        credentials: 'omit',
       });
     } catch {
       const error = new Error('Network error');
@@ -372,6 +391,56 @@ const jiraClient = {
     };
   },
 
+  async getTransitions(issueKey) {
+    if (!isValidIssueKey(issueKey)) {
+      const error = new Error('Invalid issue key');
+      error.code = 'invalid_issue_key';
+      throw error;
+    }
+
+    const resp = await this.fetch(
+      `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`,
+      { method: 'GET' },
+    );
+
+    if (resp.status !== 200) {
+      const error = new Error('Transitions request failed');
+      error.status = resp.status;
+      throw error;
+    }
+
+    const json = await resp.json();
+    const transitions = Array.isArray(json?.transitions) ? json.transitions : [];
+    return transitions.map((t) => ({
+      id: String(t?.id || ''),
+      name: String(t?.name || ''),
+      toStatus: String(t?.to?.name || ''),
+    })).filter((t) => t.id && t.name);
+  },
+
+  async doTransition(issueKey, transitionId) {
+    if (!isValidIssueKey(issueKey)) {
+      const error = new Error('Invalid issue key');
+      error.code = 'invalid_issue_key';
+      throw error;
+    }
+
+    const resp = await this.fetch(
+      `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`,
+      {
+        method: 'POST',
+        body: { transition: { id: String(transitionId) } },
+      },
+    );
+
+    if (resp.status !== 204) {
+      const error = new Error('Transition request failed');
+      error.status = resp.status;
+      error.detail = await readJiraErrorDetail(resp);
+      throw error;
+    }
+  },
+
   async addRemoteLink(issueKey, payload) {
     if (!isValidIssueKey(issueKey)) {
       const error = new Error('Invalid issue key');
@@ -390,7 +459,27 @@ const jiraClient = {
     if (resp.status !== 200 && resp.status !== 201) {
       const error = new Error('Remote link request failed');
       error.status = resp.status;
+      error.detail = await readJiraErrorDetail(resp);
       throw error;
+    }
+  },
+
+  async hasGerritComment(issueKey, needle) {
+    if (!isValidIssueKey(issueKey) || !needle) return false;
+
+    const resp = await this.fetch(
+      `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment?maxResults=100&orderBy=-created`,
+      { method: 'GET' },
+    );
+    // Duplicate check is best-effort: on lookup failure, do not block comment creation.
+    if (resp.status !== 200) return false;
+
+    try {
+      const json = await resp.json();
+      const comments = Array.isArray(json?.comments) ? json.comments : [];
+      return comments.some((c) => JSON.stringify(c?.body || '').includes(needle));
+    } catch {
+      return false;
     }
   },
 
@@ -412,6 +501,7 @@ const jiraClient = {
     if (resp.status !== 201) {
       const error = new Error('Comment request failed');
       error.status = resp.status;
+      error.detail = await readJiraErrorDetail(resp);
       throw error;
     }
   },
@@ -488,6 +578,37 @@ async function handlePopupGetIssue(issueKey) {
   }
 }
 
+async function handlePopupGetTransitions(issueKey) {
+  try {
+    const key = String(issueKey || '').trim();
+    const transitions = await jiraClient.getTransitions(key);
+    return { ok: true, transitions };
+  } catch (err) {
+    return {
+      ok: false,
+      message: mapClientError(err, '상태 목록 조회에 실패했습니다.'),
+    };
+  }
+}
+
+async function handlePopupDoTransition(issueKey, transitionId) {
+  const id = String(transitionId || '').trim();
+  if (!id) {
+    return { ok: false, message: '변경할 상태를 선택하세요.' };
+  }
+
+  try {
+    const key = String(issueKey || '').trim();
+    await jiraClient.doTransition(key, id);
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      message: mapClientError(err, '상태 변경에 실패했습니다.'),
+    };
+  }
+}
+
 async function handlePopupAddRemoteLink(issueKeyOverride) {
   const contextResp = await getActiveGerritContext();
   if (!contextResp.ok) {
@@ -522,7 +643,14 @@ async function handlePopupAddRemoteLink(issueKeyOverride) {
   }
 }
 
-async function handlePopupAddComment(issueKeyOverride) {
+function buildDuplicateNeedle(context) {
+  if (context.project && context.changeNum) {
+    return `/c/${context.project}/+/${context.changeNum}`;
+  }
+  return context.gerritUrl || '';
+}
+
+async function handlePopupAddComment(issueKeyOverride, force) {
   const contextResp = await getActiveGerritContext();
   if (!contextResp.ok) {
     return { ok: false, message: contextResp.message };
@@ -546,6 +674,21 @@ async function handlePopupAddComment(issueKeyOverride) {
   }
 
   try {
+    if (!force) {
+      const duplicated = await jiraClient.hasGerritComment(
+        issueKey,
+        buildDuplicateNeedle(context),
+      );
+      if (duplicated) {
+        return {
+          ok: false,
+          duplicate: true,
+          issueKey,
+          message: `${issueKey}에 이 change의 코멘트가 이미 있습니다.`,
+        };
+      }
+    }
+
     const adfDoc = await buildCommentAdf(context);
     await jiraClient.addComment(issueKey, adfDoc);
     return { ok: true, issueKey };
@@ -602,14 +745,30 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === MSG.POPUP_GET_TRANSITIONS) {
+    handlePopupGetTransitions(msg.issueKey).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === MSG.POPUP_DO_TRANSITION) {
+    handlePopupDoTransition(msg.issueKey, msg.transitionId).then(sendResponse);
+    return true;
+  }
+
   if (msg.type === MSG.POPUP_ADD_REMOTE_LINK) {
     handlePopupAddRemoteLink(msg.issueKeyOverride).then(sendResponse);
     return true;
   }
 
   if (msg.type === MSG.POPUP_ADD_COMMENT) {
-    handlePopupAddComment(msg.issueKeyOverride).then(sendResponse);
+    handlePopupAddComment(msg.issueKeyOverride, !!msg.force).then(sendResponse);
     return true;
+  }
+
+  if (msg.type === MSG.OPEN_OPTIONS) {
+    chrome.runtime.openOptionsPage();
+    sendResponse({ ok: true });
+    return false;
   }
 
   if (msg.type === MSG.POPUP_SET_FAB_ENABLED) {
@@ -621,8 +780,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 async function handleTestConnection(email, token) {
+  // Diagnostics carry only lengths and server reason headers — never the values.
+  const emailLength = String(email || '').length;
+  const tokenLength = String(token || '').length;
+
   if (!email || !token) {
-    return { status: 401 };
+    return { status: 401, reason: 'EMPTY_INPUT', emailLength, tokenLength };
   }
 
   try {
@@ -633,8 +796,16 @@ async function handleTestConnection(email, token) {
         Authorization: `Basic ${btoa(`${email}:${token}`)}`,
         Accept: 'application/json',
       },
+      credentials: 'omit',
     });
-    return { status: resp.status };
+    return {
+      status: resp.status,
+      reason: resp.headers.get('x-seraph-loginreason') || '',
+      denied: resp.headers.get('x-authentication-denied-reason') || '',
+      headerNames: [...resp.headers.keys()].join(', '),
+      emailLength,
+      tokenLength,
+    };
   } catch {
     return { status: null, networkError: true };
   }

@@ -145,6 +145,7 @@
       padding: 9px 12px;
       border-radius: 10px;
       line-height: 1.5;
+      white-space: pre-line;
     }
     #status:empty { padding: 0; }
     #status.ok  { background: var(--ok-bg); color: var(--ok-fg); }
@@ -269,7 +270,7 @@
     type="email"
     id="email"
     placeholder="user@example.com"
-    autocomplete="username"
+    autocomplete="off"
     spellcheck="false"
   >
 
@@ -278,7 +279,7 @@
     type="password"
     id="token"
     placeholder="API 토큰을 입력하세요"
-    autocomplete="current-password"
+    autocomplete="off"
     spellcheck="false"
   >
   <div class="field-note">

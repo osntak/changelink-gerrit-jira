@@ -9,12 +9,15 @@ const issueStatusEl = document.getElementById('issue-status');
 const issueAssigneeEl = document.getElementById('issue-assignee');
 const statusEl = document.getElementById('status');
 const btnRefresh = document.getElementById('btn-refresh');
+const btnApply = document.getElementById('btn-apply');
 const btnLink = document.getElementById('btn-link');
 const btnComment = document.getElementById('btn-comment');
 const fabEnabledEl = document.getElementById('fab-enabled');
 const btnOptions = document.getElementById('btn-options');
 const issueKeyInputEl = document.getElementById('issue-key-input');
 const btnOpenIssue = document.getElementById('btn-open-issue');
+const transitionSelectEl = document.getElementById('transition-select');
+const btnTransition = document.getElementById('btn-transition');
 
 let currentContext = null;
 let authConfigured = true;
@@ -38,6 +41,7 @@ function syncActionButtons() {
   issueKeyInputEl.disabled = false;
   btnRefresh.disabled = false;
   const key = getEffectiveIssueKey();
+  btnApply.disabled = !authConfigured || !key;
   btnLink.disabled = !authConfigured || !key;
   btnComment.disabled = !authConfigured || !key;
   btnOpenIssue.disabled = !key;
@@ -46,6 +50,7 @@ function syncActionButtons() {
 function setActionBusy(isBusy) {
   if (isBusy) {
     btnRefresh.disabled = true;
+    btnApply.disabled = true;
     btnLink.disabled = true;
     btnComment.disabled = true;
     return;
@@ -111,6 +116,73 @@ function renderIssueCard(issue) {
 
 function hideIssueCard() {
   issueCardEl.style.display = 'none';
+  resetTransitionUi();
+}
+
+function resetTransitionUi() {
+  transitionSelectEl.innerHTML = '<option value="">상태 변경...</option>';
+  transitionSelectEl.disabled = true;
+  btnTransition.disabled = true;
+}
+
+function renderTransitions(transitions) {
+  resetTransitionUi();
+  if (!Array.isArray(transitions) || transitions.length === 0) return;
+
+  for (const t of transitions) {
+    const option = document.createElement('option');
+    option.value = t.id;
+    option.textContent = t.toStatus && t.toStatus !== t.name
+      ? `${t.name} → ${t.toStatus}`
+      : t.name;
+    transitionSelectEl.appendChild(option);
+  }
+  transitionSelectEl.disabled = false;
+}
+
+async function loadTransitions(issueKey) {
+  resetTransitionUi();
+  try {
+    const resp = await sendMessage({
+      type: MSG.POPUP_GET_TRANSITIONS,
+      issueKey,
+    });
+    if (resp?.ok) renderTransitions(resp.transitions);
+  } catch {
+    // Transition list is optional UI; issue lookup already reported errors.
+  }
+}
+
+async function applyTransition() {
+  const issueKey = getEffectiveIssueKey();
+  const transitionId = transitionSelectEl.value;
+  if (!issueKey || !transitionId) return;
+
+  setActionBusy(true);
+  transitionSelectEl.disabled = true;
+  btnTransition.disabled = true;
+  setStatus('상태 변경 중...', '');
+  try {
+    const resp = await sendMessage({
+      type: MSG.POPUP_DO_TRANSITION,
+      issueKey,
+      transitionId,
+    });
+    if (!resp?.ok) {
+      setStatus(resp?.message || '상태 변경에 실패했습니다.', 'err');
+      transitionSelectEl.disabled = false;
+      btnTransition.disabled = false;
+      return;
+    }
+    setStatus(`상태 변경 완료: ${issueKey}`, 'ok');
+    await fetchIssue();
+  } catch {
+    setStatus('요청 중 오류가 발생했습니다.', 'err');
+    transitionSelectEl.disabled = false;
+    btnTransition.disabled = false;
+  } finally {
+    setActionBusy(false);
+  }
 }
 
 function sendMessage(msg) {
@@ -206,6 +278,7 @@ async function fetchIssue() {
 
     renderIssueCard(resp.issue);
     setStatus(`이슈 조회 완료: ${issueKey}`, 'ok');
+    await loadTransitions(issueKey);
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
   } finally {
@@ -240,6 +313,18 @@ async function addRemoteLink() {
   }
 }
 
+async function requestAddComment(issueKey) {
+  const resp = await sendMessage({ type: MSG.POPUP_ADD_COMMENT, issueKeyOverride: issueKey });
+  if (resp?.duplicate) {
+    const proceed = window.confirm(
+      `${resp.issueKey}에 이 change의 코멘트가 이미 있습니다.\n그래도 새 코멘트를 생성할까요?`,
+    );
+    if (!proceed) return { ok: false, cancelled: true };
+    return sendMessage({ type: MSG.POPUP_ADD_COMMENT, issueKeyOverride: issueKey, force: true });
+  }
+  return resp;
+}
+
 async function addComment() {
   if (!authConfigured) {
     setStatus('Jira 인증이 없어 코멘트 생성은 비활성화되었습니다.', 'warn');
@@ -254,12 +339,53 @@ async function addComment() {
   setActionBusy(true);
   setStatus('코멘트 생성 중...', '');
   try {
-    const resp = await sendMessage({ type: MSG.POPUP_ADD_COMMENT, issueKeyOverride: issueKey });
+    const resp = await requestAddComment(issueKey);
+    if (resp?.cancelled) {
+      setStatus('코멘트 생성을 취소했습니다.', 'warn');
+      return;
+    }
     if (!resp?.ok) {
       setStatus(resp?.message || '코멘트 생성에 실패했습니다.', 'err');
       return;
     }
     setStatus(`코멘트 생성 완료: ${issueKey}`, 'ok');
+  } catch {
+    setStatus('요청 중 오류가 발생했습니다.', 'err');
+  } finally {
+    setActionBusy(false);
+  }
+}
+
+async function applyLinkAndComment() {
+  if (!authConfigured) {
+    setStatus('Jira 인증이 없어 반영 처리는 비활성화되었습니다.', 'warn');
+    return;
+  }
+  const issueKey = getEffectiveIssueKey();
+  if (!issueKey) {
+    setStatus('이슈키를 먼저 확인하세요.', 'warn');
+    return;
+  }
+
+  setActionBusy(true);
+  setStatus('반영 처리 중... (웹링크 + 코멘트)', '');
+  try {
+    const linkResp = await sendMessage({ type: MSG.POPUP_ADD_REMOTE_LINK, issueKeyOverride: issueKey });
+    if (!linkResp?.ok) {
+      setStatus(linkResp?.message || '웹링크 추가에 실패했습니다.', 'err');
+      return;
+    }
+
+    const commentResp = await requestAddComment(issueKey);
+    if (commentResp?.cancelled) {
+      setStatus(`웹링크만 추가했습니다: ${issueKey}`, 'warn');
+      return;
+    }
+    if (!commentResp?.ok) {
+      setStatus(`웹링크는 추가됨. 코멘트 실패:\n${commentResp?.message || ''}`, 'err');
+      return;
+    }
+    setStatus(`반영 처리 완료: ${issueKey}`, 'ok');
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
   } finally {
@@ -288,6 +414,7 @@ btnRefresh.addEventListener('click', async () => {
   setActionBusy(false);
 });
 
+btnApply.addEventListener('click', applyLinkAndComment);
 btnLink.addEventListener('click', addRemoteLink);
 btnComment.addEventListener('click', addComment);
 fabEnabledEl.addEventListener('change', () => {
@@ -304,6 +431,10 @@ btnOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
 btnOpenIssue.addEventListener('click', openIssuePage);
+transitionSelectEl.addEventListener('change', () => {
+  btnTransition.disabled = !transitionSelectEl.value;
+});
+btnTransition.addEventListener('click', applyTransition);
 
 (async () => {
   currentContext = null;
