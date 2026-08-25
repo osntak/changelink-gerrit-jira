@@ -70,7 +70,8 @@
     }
 
     input[type="email"],
-    input[type="password"] {
+    input[type="password"],
+    input[type="text"] {
       width: 100%;
       padding: 11px 13px;
       border: 1px solid var(--line);
@@ -81,8 +82,48 @@
       transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
     }
 
+    .check-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 10px 0 0;
+      font-size: 0.86rem;
+      font-weight: 500;
+      color: var(--ink-700);
+      cursor: pointer;
+    }
+
+    .check-row input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--brand);
+      cursor: pointer;
+    }
+
+    .check-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px 16px;
+      margin-top: 4px;
+    }
+
+    .sub-input {
+      margin-top: 8px;
+      margin-left: 25px;
+      width: calc(100% - 25px) !important;
+    }
+
+    .group-label {
+      margin-top: 16px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--ink-500);
+      letter-spacing: 0.02em;
+    }
+
     input[type="email"]:focus,
-    input[type="password"]:focus {
+    input[type="password"]:focus,
+    input[type="text"]:focus {
       outline: none;
       border-color: var(--brand);
       box-shadow: 0 0 0 3px rgba(15, 106, 216, 0.14);
@@ -292,6 +333,42 @@
   </div>
 
   <div id="status" role="status" aria-live="polite"></div>
+
+  <div class="section">
+    <h2>동작 설정</h2>
+
+    <label class="check-row" for="opt-preview">
+      <input type="checkbox" id="opt-preview">
+      팝업에서 코멘트 생성/반영 처리 전 미리보기·수정
+    </label>
+
+    <label class="check-row" for="opt-pill">
+      <input type="checkbox" id="opt-pill">
+      Gerrit 페이지에 이슈 상태 배지(pill) 표시
+    </label>
+
+    <label class="check-row" for="opt-transition">
+      <input type="checkbox" id="opt-transition">
+      반영 처리 시 이슈 상태 전환
+    </label>
+    <input
+      type="text"
+      id="opt-transition-name"
+      class="sub-input"
+      placeholder="전환할 상태 이름 (예: 검토 중)"
+      spellcheck="false"
+    >
+
+    <div class="group-label">FAB 메뉴 버튼 구성</div>
+    <div class="check-grid">
+      <label class="check-row" for="fab-open-issue"><input type="checkbox" id="fab-open-issue"> 이슈 페이지 이동</label>
+      <label class="check-row" for="fab-lookup"><input type="checkbox" id="fab-lookup"> 이슈 조회</label>
+      <label class="check-row" for="fab-link"><input type="checkbox" id="fab-link"> 웹링크 추가</label>
+      <label class="check-row" for="fab-comment"><input type="checkbox" id="fab-comment"> 코멘트 생성</label>
+      <label class="check-row" for="fab-apply"><input type="checkbox" id="fab-apply"> 반영 처리</label>
+      <label class="check-row" for="fab-options"><input type="checkbox" id="fab-options"> 설정</label>
+    </div>
+  </div>
 
   <div class="section">
     <h2>Jira 댓글 템플릿</h2>

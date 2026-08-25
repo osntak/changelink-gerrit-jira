@@ -18,9 +18,18 @@ const issueKeyInputEl = document.getElementById('issue-key-input');
 const btnOpenIssue = document.getElementById('btn-open-issue');
 const transitionSelectEl = document.getElementById('transition-select');
 const btnTransition = document.getElementById('btn-transition');
+const btnRowEl = document.getElementById('btn-row');
+const previewPanelEl = document.getElementById('preview-panel');
+const previewTitleEl = document.getElementById('preview-title');
+const previewDupEl = document.getElementById('preview-dup');
+const previewTextEl = document.getElementById('preview-text');
+const btnPreviewSubmit = document.getElementById('btn-preview-submit');
+const btnPreviewCancel = document.getElementById('btn-preview-cancel');
 
 let currentContext = null;
 let authConfigured = true;
+let previewEnabled = true;
+let previewMode = null; // 'comment' | 'apply'
 const JIRA_BASE = 'https://yourcompany.atlassian.net';
 
 function setStatus(message, cls) {
@@ -89,9 +98,10 @@ function buildIssueUrl(issueKey) {
 
 function loadFabSetting() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['fabEnabled'], ({ fabEnabled }) => {
+    chrome.storage.local.get(['fabEnabled', 'previewEnabled'], ({ fabEnabled, previewEnabled: pe }) => {
       const enabled = fabEnabled !== false;
       fabEnabledEl.checked = enabled;
+      previewEnabled = pe !== false;
       resolve(enabled);
     });
   });
@@ -368,28 +378,114 @@ async function applyLinkAndComment() {
   }
 
   setActionBusy(true);
-  setStatus('반영 처리 중... (웹링크 + 코멘트)', '');
+  setStatus('반영 처리 중...', '');
   try {
-    const linkResp = await sendMessage({ type: MSG.POPUP_ADD_REMOTE_LINK, issueKeyOverride: issueKey });
-    if (!linkResp?.ok) {
-      setStatus(linkResp?.message || '웹링크 추가에 실패했습니다.', 'err');
-      return;
+    let resp = await sendMessage({ type: MSG.POPUP_QUICK_APPLY, issueKeyOverride: issueKey });
+    if (resp?.duplicate) {
+      const proceed = window.confirm(
+        `${resp.issueKey}에 이 change의 코멘트가 이미 있습니다.\n그래도 반영 처리를 진행할까요?`,
+      );
+      if (!proceed) {
+        setStatus('반영 처리를 취소했습니다.', 'warn');
+        return;
+      }
+      resp = await sendMessage({ type: MSG.POPUP_QUICK_APPLY, issueKeyOverride: issueKey, force: true });
     }
 
-    const commentResp = await requestAddComment(issueKey);
-    if (commentResp?.cancelled) {
-      setStatus(`웹링크만 추가했습니다: ${issueKey}`, 'warn');
+    if (!resp?.ok) {
+      setStatus(resp?.message || '반영 처리에 실패했습니다.', 'err');
       return;
     }
-    if (!commentResp?.ok) {
-      setStatus(`웹링크는 추가됨. 코멘트 실패:\n${commentResp?.message || ''}`, 'err');
-      return;
-    }
-    setStatus(`반영 처리 완료: ${issueKey}`, 'ok');
+    setStatus(resp.message || `반영 처리 완료: ${issueKey}`, 'ok');
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
   } finally {
     setActionBusy(false);
+  }
+}
+
+// -- Editable comment preview ---------------------------------------------------
+
+let previewHidIssueCard = false;
+
+function closePreview() {
+  previewMode = null;
+  previewPanelEl.style.display = 'none';
+  btnRowEl.style.display = 'grid';
+  if (previewHidIssueCard) {
+    issueCardEl.style.display = 'block';
+    previewHidIssueCard = false;
+  }
+}
+
+async function openPreview(mode) {
+  if (!authConfigured) {
+    setStatus('Jira 인증이 없어 사용할 수 없습니다.', 'warn');
+    return;
+  }
+  const issueKey = getEffectiveIssueKey();
+  if (!issueKey) {
+    setStatus('이슈키를 먼저 확인하세요.', 'warn');
+    return;
+  }
+
+  setActionBusy(true);
+  setStatus('미리보기 생성 중...', '');
+  try {
+    const resp = await sendMessage({ type: MSG.POPUP_PREVIEW_COMMENT, issueKeyOverride: issueKey });
+    if (!resp?.ok) {
+      setStatus(resp?.message || '미리보기 생성에 실패했습니다.', 'err');
+      return;
+    }
+
+    previewMode = mode;
+    previewTextEl.value = resp.text || '';
+    previewDupEl.textContent = resp.duplicate ? '⚠ 이미 이 change의 코멘트가 있습니다' : '';
+    previewTitleEl.textContent = mode === 'apply' ? '반영 처리 — 코멘트 미리보기' : '코멘트 미리보기';
+    btnPreviewSubmit.textContent = mode === 'apply' ? '반영 처리 실행' : '코멘트 등록';
+    previewHidIssueCard = issueCardEl.style.display === 'block';
+    if (previewHidIssueCard) issueCardEl.style.display = 'none';
+    btnRowEl.style.display = 'none';
+    previewPanelEl.style.display = 'block';
+    setStatus('내용 확인/수정 후 실행하세요.', '');
+  } catch {
+    setStatus('요청 중 오류가 발생했습니다.', 'err');
+  } finally {
+    setActionBusy(false);
+  }
+}
+
+async function submitPreview() {
+  const issueKey = getEffectiveIssueKey();
+  const commentText = previewTextEl.value.trim();
+  if (!previewMode || !issueKey) return;
+  if (!commentText) {
+    setStatus('코멘트 내용이 비어 있습니다.', 'warn');
+    return;
+  }
+
+  const mode = previewMode;
+  btnPreviewSubmit.disabled = true;
+  btnPreviewCancel.disabled = true;
+  setStatus(mode === 'apply' ? '반영 처리 중...' : '코멘트 등록 중...', '');
+  try {
+    const resp = await sendMessage({
+      type: mode === 'apply' ? MSG.POPUP_QUICK_APPLY : MSG.POPUP_ADD_COMMENT,
+      issueKeyOverride: issueKey,
+      commentText,
+      force: true,
+    });
+    if (!resp?.ok) {
+      setStatus(resp?.message || '실행에 실패했습니다.', 'err');
+      return;
+    }
+    closePreview();
+    setStatus(resp.message || `${mode === 'apply' ? '반영 처리' : '코멘트 생성'} 완료: ${issueKey}`, 'ok');
+  } catch {
+    setStatus('요청 중 오류가 발생했습니다.', 'err');
+  } finally {
+    btnPreviewSubmit.disabled = false;
+    btnPreviewCancel.disabled = false;
   }
 }
 
@@ -414,9 +510,26 @@ btnRefresh.addEventListener('click', async () => {
   setActionBusy(false);
 });
 
-btnApply.addEventListener('click', applyLinkAndComment);
+btnApply.addEventListener('click', () => {
+  if (previewEnabled) openPreview('apply');
+  else applyLinkAndComment();
+});
 btnLink.addEventListener('click', addRemoteLink);
-btnComment.addEventListener('click', addComment);
+btnComment.addEventListener('click', () => {
+  if (previewEnabled) openPreview('comment');
+  else addComment();
+});
+btnPreviewSubmit.addEventListener('click', submitPreview);
+btnPreviewCancel.addEventListener('click', () => {
+  closePreview();
+  setStatus('취소했습니다.', '');
+});
+issueKeyInputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    btnRefresh.click();
+  }
+});
 fabEnabledEl.addEventListener('change', () => {
   setFabEnabled(fabEnabledEl.checked);
 });
