@@ -228,7 +228,15 @@ btnTest.addEventListener('click', async () => {
   if (result.networkError) {
     setStatus('네트워크 오류: 인터넷 연결을 확인하세요.', 'err');
   } else if (result.status === 200) {
-    setStatus('연결 성공 (200 OK) — 인증이 정상입니다.', 'ok');
+    // Passing the test but forgetting 저장 was a recurring trap — persist
+    // the verified credentials immediately.
+    chrome.storage.local.set({ jiraEmail: email, jiraToken: token }, () => {
+      if (chrome.runtime.lastError) {
+        setStatus('연결 성공 (200 OK) — 자동 저장 실패. 저장 버튼을 눌러주세요.', 'err');
+        return;
+      }
+      setStatus('연결 성공 (200 OK) — 인증 정보가 자동 저장되었습니다.', 'ok');
+    });
   } else if (result.status === 401) {
     const lines = ['인증 실패 (401) — 이메일 또는 토큰을 확인하세요.'];
     if (result.reason === 'EMPTY_INPUT') {
