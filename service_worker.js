@@ -122,6 +122,20 @@ function loadStorageData() {
   });
 }
 
+function loadBehaviorSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(
+      ['applyTransitionEnabled', 'applyTransitionName'],
+      ({ applyTransitionEnabled, applyTransitionName }) => {
+        resolve({
+          applyTransitionEnabled: !!applyTransitionEnabled,
+          applyTransitionName: String(applyTransitionName || '').trim(),
+        });
+      },
+    );
+  });
+}
+
 function setFabEnabled(enabled) {
   return new Promise((resolve) => {
     chrome.storage.local.set({ fabEnabled: !!enabled }, resolve);
@@ -418,6 +432,21 @@ const jiraClient = {
     })).filter((t) => t.id && t.name);
   },
 
+  async getStatuses() {
+    const resp = await this.fetch('/rest/api/3/status', { method: 'GET' });
+    if (resp.status !== 200) {
+      const error = new Error('Status list request failed');
+      error.status = resp.status;
+      throw error;
+    }
+
+    const json = await resp.json();
+    const names = (Array.isArray(json) ? json : [])
+      .map((s) => String(s?.name || '').trim())
+      .filter(Boolean);
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b, 'ko'));
+  },
+
   async doTransition(issueKey, transitionId) {
     if (!isValidIssueKey(issueKey)) {
       const error = new Error('Invalid issue key');
@@ -524,7 +553,7 @@ function buildRemoteLinkPayload(context) {
   return payload;
 }
 
-async function buildCommentAdf(context) {
+async function buildCommentText(context) {
   const { commentTemplate } = await loadStorageData();
   const template = (commentTemplate || '').trim() || DEFAULT_TEMPLATE;
   const reflectedAt = formatDateMaybe(context.submittedAt);
@@ -541,11 +570,18 @@ async function buildCommentAdf(context) {
     url: context.gerritUrl,
   });
 
-  const safeText = ensureCommentMinimum(rendered, {
+  return ensureCommentMinimum(rendered, {
     title: context.subject || '(no title)',
     url: context.gerritUrl,
   });
+}
 
+async function buildCommentAdf(context, commentTextOverride) {
+  const text = String(commentTextOverride || '').trim() || await buildCommentText(context);
+  const safeText = ensureCommentMinimum(text, {
+    title: context.subject || '(no title)',
+    url: context.gerritUrl,
+  });
   return textToAdf(safeText, context.gerritUrl).body;
 }
 
@@ -650,7 +686,7 @@ function buildDuplicateNeedle(context) {
   return context.gerritUrl || '';
 }
 
-async function handlePopupAddComment(issueKeyOverride, force) {
+async function resolveCommentTarget(issueKeyOverride) {
   const contextResp = await getActiveGerritContext();
   if (!contextResp.ok) {
     return { ok: false, message: contextResp.message };
@@ -673,6 +709,32 @@ async function handlePopupAddComment(issueKeyOverride, force) {
     };
   }
 
+  return { ok: true, context, issueKey };
+}
+
+async function handlePopupPreviewComment(issueKeyOverride) {
+  const target = await resolveCommentTarget(issueKeyOverride);
+  if (!target.ok) return target;
+
+  try {
+    const [text, duplicated] = await Promise.all([
+      buildCommentText(target.context),
+      jiraClient.hasGerritComment(target.issueKey, buildDuplicateNeedle(target.context)),
+    ]);
+    return { ok: true, issueKey: target.issueKey, text, duplicate: duplicated };
+  } catch (err) {
+    return {
+      ok: false,
+      message: mapClientError(err, '코멘트 미리보기 생성에 실패했습니다.'),
+    };
+  }
+}
+
+async function handlePopupAddComment(issueKeyOverride, force, commentText) {
+  const target = await resolveCommentTarget(issueKeyOverride);
+  if (!target.ok) return target;
+  const { context, issueKey } = target;
+
   try {
     if (!force) {
       const duplicated = await jiraClient.hasGerritComment(
@@ -689,13 +751,94 @@ async function handlePopupAddComment(issueKeyOverride, force) {
       }
     }
 
-    const adfDoc = await buildCommentAdf(context);
+    const adfDoc = await buildCommentAdf(context, commentText);
     await jiraClient.addComment(issueKey, adfDoc);
     return { ok: true, issueKey };
   } catch (err) {
     return {
       ok: false,
       message: mapClientError(err, '코멘트 생성에 실패했습니다.'),
+    };
+  }
+}
+
+async function transitionByNameIfConfigured(issueKey) {
+  const { applyTransitionEnabled, applyTransitionName } = await loadBehaviorSettings();
+  if (!applyTransitionEnabled || !applyTransitionName) {
+    return { attempted: false };
+  }
+
+  const wanted = applyTransitionName.toLowerCase();
+  try {
+    const transitions = await jiraClient.getTransitions(issueKey);
+    const match = transitions.find(
+      (t) => t.name.toLowerCase() === wanted || t.toStatus.toLowerCase() === wanted,
+    );
+    if (!match) {
+      return {
+        attempted: true,
+        ok: false,
+        note: `일치하는 상태 없음: ${applyTransitionName} (이미 해당 상태이거나 이름 확인 필요)`,
+      };
+    }
+    await jiraClient.doTransition(issueKey, match.id);
+    return { attempted: true, ok: true, note: match.toStatus || match.name };
+  } catch (err) {
+    return {
+      attempted: true,
+      ok: false,
+      note: mapClientError(err, '상태 변경 실패'),
+    };
+  }
+}
+
+async function handlePopupQuickApply(issueKeyOverride, commentText, force) {
+  const target = await resolveCommentTarget(issueKeyOverride);
+  if (!target.ok) return target;
+  const { context, issueKey } = target;
+
+  try {
+    if (!force) {
+      const duplicated = await jiraClient.hasGerritComment(
+        issueKey,
+        buildDuplicateNeedle(context),
+      );
+      if (duplicated) {
+        return {
+          ok: false,
+          duplicate: true,
+          issueKey,
+          message: `${issueKey}에 이 change의 코멘트가 이미 있습니다.`,
+        };
+      }
+    }
+
+    await jiraClient.addRemoteLink(issueKey, buildRemoteLinkPayload(context));
+
+    const adfDoc = await buildCommentAdf(context, commentText);
+    await jiraClient.addComment(issueKey, adfDoc);
+
+    const transition = await transitionByNameIfConfigured(issueKey);
+
+    let summary = `반영 처리 완료: ${issueKey} (웹링크+코멘트`;
+    if (transition.attempted && transition.ok) {
+      summary += `+상태변경: ${transition.note})`;
+    } else if (transition.attempted) {
+      summary += `) / 상태변경 실패: ${transition.note}`;
+    } else {
+      summary += ')';
+    }
+
+    return {
+      ok: true,
+      issueKey,
+      transitioned: !!(transition.attempted && transition.ok),
+      message: summary,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: mapClientError(err, '반영 처리에 실패했습니다.'),
     };
   }
 }
@@ -761,7 +904,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === MSG.POPUP_ADD_COMMENT) {
-    handlePopupAddComment(msg.issueKeyOverride, !!msg.force).then(sendResponse);
+    handlePopupAddComment(msg.issueKeyOverride, !!msg.force, msg.commentText).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === MSG.POPUP_PREVIEW_COMMENT) {
+    handlePopupPreviewComment(msg.issueKeyOverride).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === MSG.POPUP_QUICK_APPLY) {
+    handlePopupQuickApply(msg.issueKeyOverride, msg.commentText, !!msg.force).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === MSG.GET_JIRA_STATUSES) {
+    jiraClient.getStatuses()
+      .then((statuses) => sendResponse({ ok: true, statuses }))
+      .catch(() => sendResponse({ ok: false, statuses: [] }));
     return true;
   }
 

@@ -86,8 +86,25 @@ chrome.storage.local.get(
     for (const [key, el] of Object.entries(FAB_ACTION_INPUTS)) {
       el.checked = actions[key] !== false;
     }
+
+    // Populate the status combo suggestions when credentials are available.
+    if (jiraEmail && jiraToken) loadStatusSuggestions();
   },
 );
+
+function loadStatusSuggestions() {
+  chrome.runtime.sendMessage({ type: MSG.GET_JIRA_STATUSES }, (resp) => {
+    if (chrome.runtime.lastError || !resp?.ok) return;
+    const datalist = document.getElementById('status-options');
+    if (!datalist) return;
+    datalist.innerHTML = '';
+    for (const name of resp.statuses || []) {
+      const option = document.createElement('option');
+      option.value = name;
+      datalist.appendChild(option);
+    }
+  });
+}
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 
