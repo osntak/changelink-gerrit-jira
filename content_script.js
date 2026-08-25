@@ -39,6 +39,7 @@ let networkContextCache = {
 
 const JIRA_BASE = 'https://yourcompany.atlassian.net';
 let detailFetchInFlight = null;
+let detailFetchChangeNum = null;
 
 // -- Shadow-DOM helpers -------------------------------------------------------
 
@@ -111,9 +112,14 @@ function buildGerritDetailCandidates() {
 }
 
 async function fetchGerritDetailContext() {
-  if (detailFetchInFlight) return detailFetchInFlight;
+  const changeNum = extractChangeNum();
+  // Reuse only a fetch started for the SAME change; a stale in-flight fetch
+  // from a previous SPA page must not be returned for the new change.
+  if (detailFetchInFlight && detailFetchChangeNum === changeNum) {
+    return detailFetchInFlight;
+  }
 
-  detailFetchInFlight = (async () => {
+  const fetchPromise = (async () => {
     const candidates = buildGerritDetailCandidates();
     for (const path of candidates) {
       try {
@@ -129,6 +135,10 @@ async function fetchGerritDetailContext() {
         const derived = deriveContextFromPayload(payload);
         if (!derived) continue;
 
+        // Drop stale results: user may have navigated to another change
+        // while this request was in flight.
+        if (extractChangeNum() !== changeNum) return null;
+
         mergeNetworkContext(derived);
         return derived;
       } catch {
@@ -138,10 +148,16 @@ async function fetchGerritDetailContext() {
     return null;
   })();
 
+  detailFetchInFlight = fetchPromise;
+  detailFetchChangeNum = changeNum;
+
   try {
-    return await detailFetchInFlight;
+    return await fetchPromise;
   } finally {
-    detailFetchInFlight = null;
+    if (detailFetchInFlight === fetchPromise) {
+      detailFetchInFlight = null;
+      detailFetchChangeNum = null;
+    }
   }
 }
 
@@ -153,7 +169,8 @@ function deriveContextFromPayload(payload) {
   const project = String(payload.project || '').trim();
   const owner = String(payload?.owner?.name || payload?.owner?.username || '').trim();
   const changeNum = String(payload?._number || '').trim();
-  const submittedAt = String(payload.submitted || payload.updated || '').trim();
+  // Only the real submit time counts as "반영 일시" — unmerged changes stay blank.
+  const submittedAt = String(payload.submitted || '').trim();
 
   const revisions = payload.revisions || {};
   const currentRevisionKey = payload.current_revision;
