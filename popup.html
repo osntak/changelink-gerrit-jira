@@ -307,17 +307,17 @@
       <div class="head-row">
         <h1>Changelink</h1>
         <div class="head-actions">
-          <button id="btn-refresh" class="icon-btn" title="이슈 다시 조회" aria-label="이슈 다시 조회">↻</button>
-          <button id="btn-options" class="icon-btn" title="설정 열기" aria-label="설정 열기">⚙</button>
+          <button id="btn-refresh" class="icon-btn" data-i18n-title="popup.btn.refresh" data-i18n-label="popup.btn.refresh">↻</button>
+          <button id="btn-options" class="icon-btn" data-i18n-title="popup.btn.options" data-i18n-label="popup.btn.options">⚙</button>
         </div>
       </div>
       <div id="issue-title" class="issue-title">-</div>
 
       <div class="info-grid">
-        <span>Issue</span>
+        <span data-i18n="popup.label.issue">Issue</span>
         <div class="field-inline">
           <input id="issue-key-input" type="text" placeholder="PROJ-123">
-          <button id="btn-open-issue" class="arrow-btn" title="이슈 페이지 이동" aria-label="이슈 페이지 이동">
+          <button id="btn-open-issue" class="arrow-btn" data-i18n-title="popup.btn.openIssue" data-i18n-label="popup.btn.openIssue">
             <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M14 3h7v7"></path>
               <path d="M10 14 21 3"></path>
@@ -326,35 +326,35 @@
             </svg>
           </button>
         </div>
-        <span>Status</span>
-        <select id="issue-status-select" aria-label="상태 변경" disabled>
+        <span data-i18n="popup.label.status">Status</span>
+        <select id="issue-status-select" data-i18n-label="popup.label.statusChange" disabled>
           <option value="">-</option>
         </select>
-        <span>Assignee</span>
+        <span data-i18n="popup.label.assignee">Assignee</span>
         <div id="issue-assignee" class="value">-</div>
       </div>
       <div id="issue-comment-state" class="comment-state"></div>
 
       <div id="btn-row" class="btn-row">
-        <button id="btn-apply" class="span2">⚡ 반영 처리</button>
-        <button id="btn-link">웹링크 추가</button>
-        <button id="btn-comment">코멘트 생성</button>
+        <button id="btn-apply" class="span2" data-i18n="popup.btn.apply">⚡ 반영 처리</button>
+        <button id="btn-link" data-i18n="popup.btn.link">웹링크 추가</button>
+        <button id="btn-comment" data-i18n="popup.btn.comment">코멘트 생성</button>
       </div>
 
       <div id="preview-panel" class="preview-panel">
         <div class="preview-head">
-          <span id="preview-title">코멘트 미리보기</span>
+          <span id="preview-title" data-i18n="popup.preview.title">코멘트 미리보기</span>
           <span id="preview-dup" class="dup-warn"></span>
         </div>
         <textarea id="preview-text" spellcheck="false"></textarea>
         <div class="preview-actions">
-          <button id="btn-preview-submit" class="primary">등록</button>
-          <button id="btn-preview-cancel">취소</button>
+          <button id="btn-preview-submit" class="primary" data-i18n="popup.btn.previewSubmit">등록</button>
+          <button id="btn-preview-cancel" data-i18n="popup.btn.previewCancel">취소</button>
         </div>
       </div>
 
       <div class="toggle-row">
-        <span>Enable FAB</span>
+        <span data-i18n="popup.label.fab">Enable FAB</span>
         <label class="switch" for="fab-enabled">
           <input id="fab-enabled" type="checkbox">
           <span class="slider"></span>
@@ -363,9 +363,10 @@
 
     </section>
 
-    <div id="status" class="status">초기화 중...</div>
+    <div id="status" class="status" data-i18n="popup.status.initializing">초기화 중...</div>
   </div>
 
+  <script src="i18n.js"></script>
   <script src="message_types.js"></script>
   <script src="popup.js"></script>
 </body>

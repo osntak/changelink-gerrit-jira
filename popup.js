@@ -87,12 +87,12 @@ function isChangeMerged() {
 function updateApplyEmphasis() {
   const emphasize = isChangeMerged() && commentDuplicate !== true;
   btnApply.classList.toggle('primary', emphasize);
-  btnApply.title = emphasize ? '머지된 change입니다. Jira에 반영 처리하세요.' : '';
+  btnApply.title = emphasize ? I18N.t('popup.title.applyMerged') : '';
 }
 
 function renderCommentState() {
   if (commentDuplicate === true) {
-    issueCommentStateEl.textContent = '💬 이 change의 코멘트가 이미 등록되어 있습니다';
+    issueCommentStateEl.textContent = I18N.t('popup.state.commentExists');
     issueCommentStateEl.style.display = 'block';
   } else {
     issueCommentStateEl.style.display = 'none';
@@ -157,7 +157,7 @@ async function loadAuthState() {
 function renderIssueCard(issue) {
   if (issue.summary) issueTitleEl.textContent = issue.summary;
   currentIssueStatus = issue.status || '';
-  issueAssigneeEl.textContent = issue.assignee || 'Unassigned';
+  issueAssigneeEl.textContent = issue.assignee || I18N.t('popup.value.unassigned');
   resetTransitionUi();
 }
 
@@ -215,7 +215,7 @@ async function applyTransition() {
 
   setActionBusy(true);
   issueStatusSelectEl.disabled = true;
-  setStatus('상태 변경 중...', '');
+  setStatus(I18N.t('popup.status.transitioning'), '');
   try {
     const resp = await sendMessage({
       type: MSG.POPUP_DO_TRANSITION,
@@ -223,15 +223,15 @@ async function applyTransition() {
       transitionId,
     });
     if (!resp?.ok) {
-      setStatus(resp?.message || '상태 변경에 실패했습니다.', 'err');
+      setStatus(resp?.message || I18N.t('popup.status.transitionFailed'), 'err');
       issueStatusSelectEl.value = '';
       issueStatusSelectEl.disabled = false;
       return;
     }
-    setStatus(`상태 변경 완료: ${issueKey}`, 'ok');
+    setStatus(I18N.t('popup.status.transitionDone', { key: issueKey }), 'ok');
     await fetchIssue();
   } catch {
-    setStatus('요청 중 오류가 발생했습니다.', 'err');
+    setStatus(I18N.t('popup.status.requestError'), 'err');
     issueStatusSelectEl.value = '';
     issueStatusSelectEl.disabled = false;
   } finally {
@@ -259,23 +259,23 @@ async function loadContext() {
       currentContext = null;
       issueTitleEl.textContent = '-';
       syncActionButtons();
-      setStatus(resp?.message || 'Gerrit 페이지를 찾을 수 없습니다.', 'warn');
+      setStatus(resp?.message || I18N.t('popup.status.noGerritPage'), 'warn');
       return false;
     }
 
     renderContext(resp.context);
     if (!getEffectiveIssueKey()) {
       hideIssueCard();
-      setStatus('Issue key를 입력하거나 자동 감지를 확인하세요.', 'warn');
+      setStatus(I18N.t('popup.status.enterIssueKey'), 'warn');
       return true;
     }
-    setStatus('컨텍스트 확인 완료. 이슈 조회를 실행합니다.', 'ok');
+    setStatus(I18N.t('popup.status.contextReady'), 'ok');
     return true;
   } catch {
     hideIssueCard();
     currentContext = null;
     syncActionButtons();
-    setStatus('확장프로그램과 통신할 수 없습니다. 확장프로그램을 다시 로드하세요.', 'err');
+    setStatus(I18N.t('popup.status.noConnection'), 'err');
     return false;
   }
 }
@@ -288,18 +288,18 @@ async function setFabEnabled(enabled) {
       enabled: !!enabled,
     });
     if (!resp?.ok) {
-      setStatus(resp?.message || 'FAB 설정 저장에 실패했습니다.', 'err');
+      setStatus(resp?.message || I18N.t('popup.status.fabSaveFailed'), 'err');
       fabEnabledEl.checked = !enabled;
       return;
     }
     if (resp.message) {
       setStatus(resp.message, 'warn');
     } else {
-      setStatus(`FAB ${enabled ? '활성화' : '비활성화'} 완료`, 'ok');
+      setStatus(I18N.t(enabled ? 'popup.status.fabOn' : 'popup.status.fabOff'), 'ok');
     }
   } catch {
     fabEnabledEl.checked = !enabled;
-    setStatus('FAB 설정 변경 중 오류가 발생했습니다.', 'err');
+    setStatus(I18N.t('popup.status.fabError'), 'err');
   } finally {
     fabEnabledEl.disabled = false;
   }
@@ -307,17 +307,17 @@ async function setFabEnabled(enabled) {
 
 async function fetchIssue() {
   if (!authConfigured) {
-    setStatus('Jira 인증이 없어 이슈 조회는 비활성화되었습니다.\n컨텍스트 탐색은 계속 사용할 수 있습니다.', 'warn');
+    setStatus(I18N.t('popup.status.authMissingFetch'), 'warn');
     return;
   }
   const issueKey = getEffectiveIssueKey();
   if (!issueKey) {
-    setStatus('이슈키를 먼저 확인하세요.', 'warn');
+    setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
     return;
   }
 
   setActionBusy(true);
-  setStatus('Jira 이슈 조회 중...', '');
+  setStatus(I18N.t('popup.status.fetchingIssue'), '');
   try {
     const resp = await sendMessage({
       type: MSG.POPUP_GET_ISSUE,
@@ -326,15 +326,15 @@ async function fetchIssue() {
 
     if (!resp?.ok) {
       hideIssueCard();
-      setStatus(resp?.message || '이슈 조회에 실패했습니다.', 'err');
+      setStatus(resp?.message || I18N.t('popup.status.fetchFailed'), 'err');
       return;
     }
 
     renderIssueCard(resp.issue);
-    setStatus(`이슈 조회 완료: ${issueKey}`, 'ok');
+    setStatus(I18N.t('popup.status.fetchDone', { key: issueKey }), 'ok');
     await Promise.all([loadTransitions(issueKey), checkCommentState(issueKey)]);
   } catch {
-    setStatus('요청 중 오류가 발생했습니다.', 'err');
+    setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
     setActionBusy(false);
   }
@@ -342,26 +342,26 @@ async function fetchIssue() {
 
 async function addRemoteLink() {
   if (!authConfigured) {
-    setStatus('Jira 인증이 없어 웹링크 추가는 비활성화되었습니다.', 'warn');
+    setStatus(I18N.t('popup.status.authMissingLink'), 'warn');
     return;
   }
   const issueKey = getEffectiveIssueKey();
   if (!issueKey) {
-    setStatus('이슈키를 먼저 확인하세요.', 'warn');
+    setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
     return;
   }
 
   setActionBusy(true);
-  setStatus('웹링크 추가 중...', '');
+  setStatus(I18N.t('popup.status.addingLink'), '');
   try {
     const resp = await sendMessage({ type: MSG.POPUP_ADD_REMOTE_LINK, issueKeyOverride: issueKey });
     if (!resp?.ok) {
-      setStatus(resp?.message || '웹링크 추가에 실패했습니다.', 'err');
+      setStatus(resp?.message || I18N.t('popup.status.linkFailed'), 'err');
       return;
     }
-    setStatus(`웹링크 추가 완료: ${issueKey}`, 'ok');
+    setStatus(I18N.t('popup.status.linkDone', { key: issueKey }), 'ok');
   } catch {
-    setStatus('요청 중 오류가 발생했습니다.', 'err');
+    setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
     setActionBusy(false);
   }
@@ -370,9 +370,7 @@ async function addRemoteLink() {
 async function requestAddComment(issueKey) {
   const resp = await sendMessage({ type: MSG.POPUP_ADD_COMMENT, issueKeyOverride: issueKey });
   if (resp?.duplicate) {
-    const proceed = window.confirm(
-      `${resp.issueKey}에 이 change의 코멘트가 이미 있습니다.\n그래도 새 코멘트를 생성할까요?`,
-    );
+    const proceed = window.confirm(I18N.t('popup.confirm.duplicateComment', { key: resp.issueKey }));
     if (!proceed) return { ok: false, cancelled: true };
     return sendMessage({ type: MSG.POPUP_ADD_COMMENT, issueKeyOverride: issueKey, force: true });
   }
@@ -381,32 +379,32 @@ async function requestAddComment(issueKey) {
 
 async function addComment() {
   if (!authConfigured) {
-    setStatus('Jira 인증이 없어 코멘트 생성은 비활성화되었습니다.', 'warn');
+    setStatus(I18N.t('popup.status.authMissingComment'), 'warn');
     return;
   }
   const issueKey = getEffectiveIssueKey();
   if (!issueKey) {
-    setStatus('이슈키를 먼저 확인하세요.', 'warn');
+    setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
     return;
   }
 
   setActionBusy(true);
-  setStatus('코멘트 생성 중...', '');
+  setStatus(I18N.t('popup.status.addingComment'), '');
   try {
     const resp = await requestAddComment(issueKey);
     if (resp?.cancelled) {
-      setStatus('코멘트 생성을 취소했습니다.', 'warn');
+      setStatus(I18N.t('popup.status.commentCancelled'), 'warn');
       return;
     }
     if (!resp?.ok) {
-      setStatus(resp?.message || '코멘트 생성에 실패했습니다.', 'err');
+      setStatus(resp?.message || I18N.t('popup.status.commentFailed'), 'err');
       return;
     }
-    setStatus(`코멘트 생성 완료: ${issueKey}`, 'ok');
+    setStatus(I18N.t('popup.status.commentDone', { key: issueKey }), 'ok');
     commentDuplicate = true;
     renderCommentState();
   } catch {
-    setStatus('요청 중 오류가 발생했습니다.', 'err');
+    setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
     setActionBusy(false);
   }
@@ -414,39 +412,37 @@ async function addComment() {
 
 async function applyLinkAndComment() {
   if (!authConfigured) {
-    setStatus('Jira 인증이 없어 반영 처리는 비활성화되었습니다.', 'warn');
+    setStatus(I18N.t('popup.status.authMissingApply'), 'warn');
     return;
   }
   const issueKey = getEffectiveIssueKey();
   if (!issueKey) {
-    setStatus('이슈키를 먼저 확인하세요.', 'warn');
+    setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
     return;
   }
 
   setActionBusy(true);
-  setStatus('반영 처리 중...', '');
+  setStatus(I18N.t('popup.status.applying'), '');
   try {
     let resp = await sendMessage({ type: MSG.POPUP_QUICK_APPLY, issueKeyOverride: issueKey });
     if (resp?.duplicate) {
-      const proceed = window.confirm(
-        `${resp.issueKey}에 이 change의 코멘트가 이미 있습니다.\n그래도 반영 처리를 진행할까요?`,
-      );
+      const proceed = window.confirm(I18N.t('popup.confirm.duplicateApply', { key: resp.issueKey }));
       if (!proceed) {
-        setStatus('반영 처리를 취소했습니다.', 'warn');
+        setStatus(I18N.t('popup.status.applyCancelled'), 'warn');
         return;
       }
       resp = await sendMessage({ type: MSG.POPUP_QUICK_APPLY, issueKeyOverride: issueKey, force: true });
     }
 
     if (!resp?.ok) {
-      setStatus(resp?.message || '반영 처리에 실패했습니다.', 'err');
+      setStatus(resp?.message || I18N.t('popup.status.applyFailed'), 'err');
       return;
     }
-    setStatus(resp.message || `반영 처리 완료: ${issueKey}`, 'ok');
+    setStatus(resp.message || I18N.t('popup.status.applyDone', { key: issueKey }), 'ok');
     commentDuplicate = true;
     renderCommentState();
   } catch {
-    setStatus('요청 중 오류가 발생했습니다.', 'err');
+    setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
     setActionBusy(false);
   }
@@ -462,34 +458,34 @@ function closePreview() {
 
 async function openPreview(mode) {
   if (!authConfigured) {
-    setStatus('Jira 인증이 없어 사용할 수 없습니다.', 'warn');
+    setStatus(I18N.t('popup.status.authMissing'), 'warn');
     return;
   }
   const issueKey = getEffectiveIssueKey();
   if (!issueKey) {
-    setStatus('이슈키를 먼저 확인하세요.', 'warn');
+    setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
     return;
   }
 
   setActionBusy(true);
-  setStatus('미리보기 생성 중...', '');
+  setStatus(I18N.t('popup.status.buildingPreview'), '');
   try {
     const resp = await sendMessage({ type: MSG.POPUP_PREVIEW_COMMENT, issueKeyOverride: issueKey });
     if (!resp?.ok) {
-      setStatus(resp?.message || '미리보기 생성에 실패했습니다.', 'err');
+      setStatus(resp?.message || I18N.t('popup.status.previewFailed'), 'err');
       return;
     }
 
     previewMode = mode;
     previewTextEl.value = resp.text || '';
-    previewDupEl.textContent = resp.duplicate ? '⚠ 이미 이 change의 코멘트가 있습니다' : '';
-    previewTitleEl.textContent = mode === 'apply' ? '반영 처리 — 코멘트 미리보기' : '코멘트 미리보기';
-    btnPreviewSubmit.textContent = mode === 'apply' ? '반영 처리 실행' : '코멘트 등록';
+    previewDupEl.textContent = resp.duplicate ? I18N.t('popup.preview.dup') : '';
+    previewTitleEl.textContent = I18N.t(mode === 'apply' ? 'popup.preview.titleApply' : 'popup.preview.title');
+    btnPreviewSubmit.textContent = I18N.t(mode === 'apply' ? 'popup.btn.previewSubmitApply' : 'popup.btn.previewSubmitComment');
     btnRowEl.style.display = 'none';
     previewPanelEl.style.display = 'block';
-    setStatus('내용 확인/수정 후 실행하세요.', '');
+    setStatus(I18N.t('popup.status.previewHint'), '');
   } catch {
-    setStatus('요청 중 오류가 발생했습니다.', 'err');
+    setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
     setActionBusy(false);
   }
@@ -500,14 +496,14 @@ async function submitPreview() {
   const commentText = previewTextEl.value.trim();
   if (!previewMode || !issueKey) return;
   if (!commentText) {
-    setStatus('코멘트 내용이 비어 있습니다.', 'warn');
+    setStatus(I18N.t('popup.status.emptyComment'), 'warn');
     return;
   }
 
   const mode = previewMode;
   btnPreviewSubmit.disabled = true;
   btnPreviewCancel.disabled = true;
-  setStatus(mode === 'apply' ? '반영 처리 중...' : '코멘트 등록 중...', '');
+  setStatus(I18N.t(mode === 'apply' ? 'popup.status.applying' : 'popup.status.submittingComment'), '');
   try {
     const resp = await sendMessage({
       type: mode === 'apply' ? MSG.POPUP_QUICK_APPLY : MSG.POPUP_ADD_COMMENT,
@@ -516,15 +512,19 @@ async function submitPreview() {
       force: true,
     });
     if (!resp?.ok) {
-      setStatus(resp?.message || '실행에 실패했습니다.', 'err');
+      setStatus(resp?.message || I18N.t('popup.status.submitFailed'), 'err');
       return;
     }
     closePreview();
-    setStatus(resp.message || `${mode === 'apply' ? '반영 처리' : '코멘트 생성'} 완료: ${issueKey}`, 'ok');
+    setStatus(
+      resp.message
+        || I18N.t(mode === 'apply' ? 'popup.status.applyDone' : 'popup.status.commentDone', { key: issueKey }),
+      'ok',
+    );
     commentDuplicate = true;
     renderCommentState();
   } catch {
-    setStatus('요청 중 오류가 발생했습니다.', 'err');
+    setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
     btnPreviewSubmit.disabled = false;
     btnPreviewCancel.disabled = false;
@@ -534,12 +534,12 @@ async function submitPreview() {
 function openIssuePage() {
   const issueKey = getEffectiveIssueKey();
   if (!issueKey) {
-    setStatus('이슈키를 먼저 확인하세요.', 'warn');
+    setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
     return;
   }
   const url = buildIssueUrl(issueKey);
   if (!url) {
-    setStatus('설정에서 Jira 주소를 먼저 입력하세요.', 'warn');
+    setStatus(I18N.t('popup.status.noJiraBase'), 'warn');
     return;
   }
   chrome.tabs.create({ url });
@@ -552,7 +552,7 @@ btnRefresh.addEventListener('click', async () => {
   if (ready && authConfigured) {
     await fetchIssue();
   } else if (ready) {
-    setStatus('컨텍스트 새로고침 완료.\nJira 인증 후 이슈 조회를 사용할 수 있습니다.', 'warn');
+    setStatus(I18N.t('popup.status.contextRefreshed'), 'warn');
   }
   setActionBusy(false);
 });
@@ -569,7 +569,7 @@ btnComment.addEventListener('click', () => {
 btnPreviewSubmit.addEventListener('click', submitPreview);
 btnPreviewCancel.addEventListener('click', () => {
   closePreview();
-  setStatus('취소했습니다.', '');
+  setStatus(I18N.t('popup.status.cancelled'), '');
 });
 issueKeyInputEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
@@ -595,7 +595,8 @@ issueStatusSelectEl.addEventListener('change', () => {
   if (issueStatusSelectEl.value) applyTransition();
 });
 
-(async () => {
+I18N.init(async () => {
+  I18N.applyDom();
   currentContext = null;
   authConfigured = true;
   syncActionButtons();
@@ -605,8 +606,8 @@ issueStatusSelectEl.addEventListener('change', () => {
   if (ready && authConfigured && isGerritChangeUrl(currentContext?.gerritUrl || '') && getEffectiveIssueKey()) {
     await fetchIssue();
   } else if (ready && !authConfigured) {
-    setStatus('Jira 인증이 없어 API 버튼은 비활성화되었습니다.\nSubject/Issue Key 탐색은 계속 사용할 수 있습니다.', 'warn');
+    setStatus(I18N.t('popup.status.authMissingInit'), 'warn');
   } else if (ready) {
-    setStatus('Gerrit change URL에서 자동 조회가 실행됩니다.', 'warn');
+    setStatus(I18N.t('popup.status.autoFetchHint'), 'warn');
   }
-})();
+});

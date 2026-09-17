@@ -52,7 +52,9 @@ jobs:
           ZIP_NAME="changelink-${{ steps.release.outputs.TAG }}.zip"
           zip -r "$ZIP_NAME" \
             manifest.json \
+            _locales \
             icons \
+            i18n.js \
             message_types.js \
             content_script.js \
             service_worker.js \

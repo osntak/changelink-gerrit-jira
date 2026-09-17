@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Changelink for Gerrit and Jira Cloud",
+    "description": "Extension name shown in the store and in chrome://extensions"
+  },
+  "extDesc": {
+    "message": "Look up, link, comment on and transition Jira issues straight from the Gerrit change page.",
+    "description": "Short description shown in the store"
+  },
+  "actionTitle": {
+    "message": "Changelink",
+    "description": "Toolbar button tooltip"
+  }
+}

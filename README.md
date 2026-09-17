@@ -5,8 +5,10 @@
   <p>
     <img src="https://img.shields.io/badge/Chrome-Manifest%20V3-1f6feb" alt="Manifest V3">
     <img src="https://img.shields.io/badge/Jira-Cloud-0052cc" alt="Jira Cloud">
+    <img src="https://img.shields.io/badge/i18n-EN%20%7C%20KO-5b6b7b" alt="English and Korean">
     <img src="https://img.shields.io/badge/license-MIT-444" alt="MIT">
   </p>
+  <p><strong>English</strong> · <a href="README.ko.md">한국어</a></p>
 </div>
 
 <p align="center">
@@ -26,7 +28,7 @@ directly from the extension. There is no server in between, and no account to si
 - Adds the Gerrit change as a Jira remote link
 - Posts a comment built from your own template, with a preview you can edit before it goes out
 - Moves the issue to another status
-- Does all of the above in one click ("반영 처리"), skipping the comment if the same one is already there
+- Does all of the above in one click, skipping the comment if the same one is already there
 - Puts a draggable quick action button on the change page, with the buttons you pick
 
 ## Install
@@ -36,8 +38,8 @@ directly from the extension. There is no server in between, and no account to si
 **From source:**
 
 ```bash
-git clone https://github.com/osntak/changelink.git
-cd changelink
+git clone https://github.com/osntak/changelink-gerrit-jira.git
+cd changelink-gerrit-jira
 npm run build          # writes changelink-v<version>.zip
 ```
 
@@ -56,12 +58,18 @@ Open the options page (extension icon, then the gear button) and fill in four fi
 
 Saving asks for access to those two sites. That prompt is the extension requesting host
 permissions for the URLs you just typed, and it has to be allowed for anything to work.
-`연결 테스트` checks the credentials against `/rest/api/3/myself` and tells you the HTTP
-status, so a wrong token says 401 instead of failing silently later.
+The connection test checks the credentials against `/rest/api/3/myself` and reports the
+HTTP status, so a wrong token says 401 instead of failing silently later.
 
 <p align="center">
   <img src="store-assets/screenshot-options.png" width="760" alt="Options page">
 </p>
+
+## Language
+
+The interface speaks English and Korean. The options page has a language setting with
+three choices: follow the browser, English, or Korean. It applies immediately, including
+in Gerrit tabs that are already open.
 
 ## Comment template
 
@@ -102,8 +110,6 @@ logged. See [PRIVACY.md](PRIVACY.md).
 - **Jira Cloud.** The extension speaks REST API v3 and posts comments in ADF, so Jira
   Server and Data Center do not work yet.
 - **Gerrit** with the standard `/c/<project>/+/<number>` change URLs.
-- **Interface language is Korean.** Everything works regardless of your Jira language, but
-  the buttons and messages are Korean for now.
 
 ## How it is put together
 
@@ -113,6 +119,7 @@ logged. See [PRIVACY.md](PRIVACY.md).
 | `content_script.js` | Reads the change context out of the Gerrit DOM, draws the quick action button and status badge |
 | `popup.js` | The toolbar popup |
 | `options.js` | Settings, credential test, host permission request |
+| `i18n.js` | String table and language resolution shared by all four |
 
 ## Releases
 
@@ -120,7 +127,7 @@ Push a `vX.Y.Z` tag and the release workflow syncs the manifest version, builds 
 and publishes a GitHub release.
 
 ```bash
-git tag v1.4.0 && git push origin v1.4.0
+git tag v1.5.0 && git push origin v1.5.0
 ```
 
 ## License

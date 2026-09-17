@@ -25,6 +25,7 @@ const btnTokenVisibility = document.getElementById('btn-token-visibility');
 const optPreviewEl        = /** @type {HTMLInputElement} */ (document.getElementById('opt-preview'));
 const optPillEl           = /** @type {HTMLInputElement} */ (document.getElementById('opt-pill'));
 const optTransitionNameEl = /** @type {HTMLSelectElement} */ (document.getElementById('opt-transition-name'));
+const uiLanguageEl        = /** @type {HTMLSelectElement} */ (document.getElementById('ui-language'));
 
 const FAB_ACTION_INPUTS = {
   openIssue: /** @type {HTMLInputElement} */ (document.getElementById('fab-open-issue')),
@@ -63,47 +64,64 @@ function setStatus(msg, cls, autoClearMs) {
 
 // ── Load saved values on page open ───────────────────────────────────────────
 
-chrome.storage.local.get(
-  [
-    'gerritOrigin', 'jiraBase',
-    'jiraEmail', 'jiraToken', 'commentTemplate',
-    'previewEnabled', 'showStatusPill',
-    'applyTransitionEnabled', 'applyTransitionName', 'fabActions',
-  ],
-  ({
-    gerritOrigin, jiraBase,
-    jiraEmail, jiraToken, commentTemplate,
-    previewEnabled, showStatusPill,
-    applyTransitionEnabled, applyTransitionName, fabActions,
-  }) => {
-    if (gerritOrigin) gerritUrlEl.value = gerritOrigin;
-    if (jiraBase) jiraUrlEl.value = jiraBase;
-    if (jiraEmail) emailEl.value = jiraEmail;
-    if (jiraToken) tokenEl.value = jiraToken;
-    // Show saved template; initialize with default when not set yet.
-    templateEl.value = commentTemplate ?? DEFAULT_TEMPLATE;
+I18N.init(() => {
+  document.documentElement.lang = I18N.getLang();
+  I18N.applyDom();
 
-    optPreviewEl.checked = previewEnabled !== false;
-    optPillEl.checked = showStatusPill !== false;
+  chrome.storage.local.get(
+    [
+      'gerritOrigin', 'jiraBase',
+      'jiraEmail', 'jiraToken', 'commentTemplate',
+      'previewEnabled', 'showStatusPill',
+      'applyTransitionEnabled', 'applyTransitionName', 'fabActions',
+      'uiLanguage',
+    ],
+    ({
+      gerritOrigin, jiraBase,
+      jiraEmail, jiraToken, commentTemplate,
+      previewEnabled, showStatusPill,
+      applyTransitionEnabled, applyTransitionName, fabActions,
+      uiLanguage,
+    }) => {
+      if (gerritOrigin) gerritUrlEl.value = gerritOrigin;
+      if (jiraBase) jiraUrlEl.value = jiraBase;
+      if (jiraEmail) emailEl.value = jiraEmail;
+      if (jiraToken) tokenEl.value = jiraToken;
+      // Show saved template; initialize with default when not set yet.
+      templateEl.value = commentTemplate ?? DEFAULT_TEMPLATE;
 
-    const savedTransition = applyTransitionEnabled ? String(applyTransitionName || '') : '';
-    setTransitionOptions(savedTransition ? [savedTransition] : [], savedTransition);
+      uiLanguageEl.value = uiLanguage || 'auto';
 
-    const actions = fabActions || {};
-    for (const [key, el] of Object.entries(FAB_ACTION_INPUTS)) {
-      el.checked = actions[key] !== false;
-    }
+      optPreviewEl.checked = previewEnabled !== false;
+      optPillEl.checked = showStatusPill !== false;
 
-    // Populate the status combo from the Jira site when credentials exist.
-    if (jiraEmail && jiraToken) loadStatusOptions(savedTransition);
-  },
-);
+      const savedTransition = applyTransitionEnabled ? String(applyTransitionName || '') : '';
+      setTransitionOptions(savedTransition ? [savedTransition] : [], savedTransition);
+
+      const actions = fabActions || {};
+      for (const [key, el] of Object.entries(FAB_ACTION_INPUTS)) {
+        el.checked = actions[key] !== false;
+      }
+
+      // Populate the status combo from the Jira site when credentials exist.
+      if (jiraEmail && jiraToken) loadStatusOptions(savedTransition);
+    },
+  );
+});
+
+// Switching the combo repaints the page right away, before the save button is
+// pressed; btnSave persists the choice.
+uiLanguageEl.addEventListener('change', () => {
+  document.documentElement.lang = I18N.setLang(uiLanguageEl.value);
+  I18N.applyDom();
+  setTransitionOptions([...optTransitionNameEl.options].map((o) => o.value), optTransitionNameEl.value);
+});
 
 function setTransitionOptions(statuses, selected) {
   optTransitionNameEl.innerHTML = '';
   const offOption = document.createElement('option');
   offOption.value = '';
-  offOption.textContent = '사용 안 함';
+  offOption.textContent = I18N.t('options.transition.off');
   optTransitionNameEl.appendChild(offOption);
 
   const names = [...new Set(statuses.filter(Boolean))];
@@ -133,7 +151,9 @@ btnTokenVisibility.addEventListener('click', () => {
   tokenEl.type = show ? 'text' : 'password';
   btnTokenVisibility.classList.toggle('on', show);
   btnTokenVisibility.setAttribute('aria-pressed', String(show));
-  btnTokenVisibility.setAttribute('aria-label', show ? '토큰 숨기기' : '토큰 표시');
+  // Keep the key on the element so a later applyDom() does not revert the label.
+  btnTokenVisibility.dataset.i18nLabel = show ? 'options.a11y.hideToken' : 'options.a11y.showToken';
+  btnTokenVisibility.setAttribute('aria-label', I18N.t(btnTokenVisibility.dataset.i18nLabel));
 });
 
 // ── Site URLs ─────────────────────────────────────────────────────────────────
@@ -179,11 +199,11 @@ btnSave.addEventListener('click', async () => {
   const jiraBase = normalizeOrigin(jiraUrlEl.value);
 
   if (gerritUrlEl.value.trim() && !gerritOrigin) {
-    setStatus('Gerrit 주소는 https://gerrit.example.com 형식으로 입력하세요.', 'err');
+    setStatus(I18N.t('options.status.badGerritUrl'), 'err');
     return;
   }
   if (jiraUrlEl.value.trim() && !jiraBase) {
-    setStatus('Jira 주소는 https://yourcompany.atlassian.net 형식으로 입력하세요.', 'err');
+    setStatus(I18N.t('options.status.badJiraUrl'), 'err');
     return;
   }
 
@@ -191,17 +211,17 @@ btnSave.addEventListener('click', async () => {
   if (gerritOrigin) wanted.push(`${gerritOrigin}/*`);
   if (jiraBase) wanted.push(`${jiraBase}/*`);
   if (wanted.length && !(await requestSitePermissions(wanted))) {
-    setStatus('사이트 접근 권한이 없으면 동작하지 않습니다. 저장을 다시 눌러 허용하세요.', 'err');
+    setStatus(I18N.t('options.status.noPermission'), 'err');
     return;
   }
 
   if ((email && !token) || (!email && token)) {
-    setStatus('이메일과 토큰은 함께 입력하거나 둘 다 비워두세요.', 'err');
+    setStatus(I18N.t('options.status.credPair'), 'err');
     return;
   }
 
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    setStatus('올바른 이메일 형식을 입력하세요.', 'err');
+    setStatus(I18N.t('options.status.badEmail'), 'err');
     return;
   }
 
@@ -223,6 +243,7 @@ btnSave.addEventListener('click', async () => {
     applyTransitionEnabled: !!transitionName,
     applyTransitionName: transitionName,
     fabActions,
+    uiLanguage: uiLanguageEl.value,
   };
   if (email && token) {
     payload.jiraEmail = email;
@@ -232,7 +253,7 @@ btnSave.addEventListener('click', async () => {
   // Persisted to local storage only — no sync, no logging.
   chrome.storage.local.set(payload, () => {
     if (chrome.runtime.lastError) {
-      setStatus('저장 중 오류가 발생했습니다.', 'err');
+      setStatus(I18N.t('options.status.saveError'), 'err');
       return;
     }
 
@@ -243,15 +264,15 @@ btnSave.addEventListener('click', async () => {
     if (!email && !token) {
       chrome.storage.local.remove(['jiraEmail', 'jiraToken'], () => {
         if (chrome.runtime.lastError) {
-          setStatus('저장 중 오류가 발생했습니다.', 'err');
+          setStatus(I18N.t('options.status.saveError'), 'err');
           return;
         }
-        setStatus('저장되었습니다.', 'ok', 3000);
+        setStatus(I18N.t('options.status.saved'), 'ok', 3000);
       });
       return;
     }
 
-    setStatus('저장되었습니다.', 'ok', 3000);
+    setStatus(I18N.t('options.status.saved'), 'ok', 3000);
   });
 });
 
@@ -259,7 +280,7 @@ btnSave.addEventListener('click', async () => {
 
 btnReset.addEventListener('click', () => {
   templateEl.value = DEFAULT_TEMPLATE;
-  setStatus('기본 템플릿으로 초기화됐습니다. 저장 버튼을 눌러 적용하세요.', 'inf', 4000);
+  setStatus(I18N.t('options.status.resetDone'), 'inf', 4000);
 });
 
 // ── Connection test ───────────────────────────────────────────────────────────
@@ -271,12 +292,12 @@ btnTest.addEventListener('click', async () => {
   const token = tokenEl.value.trim();
 
   if (!email || !token) {
-    setStatus('이메일과 토큰을 입력한 뒤 테스트하세요.', 'err');
+    setStatus(I18N.t('options.status.needCreds'), 'err');
     return;
   }
 
   btnTest.disabled = true;
-  setStatus('테스트 중…', 'inf');
+  setStatus(I18N.t('options.status.testing'), 'inf');
 
   let result;
   try {
@@ -295,44 +316,44 @@ btnTest.addEventListener('click', async () => {
       );
     });
   } catch {
-    setStatus('서비스 워커와 통신할 수 없습니다. 확장프로그램을 재로드하세요.', 'err');
+    setStatus(I18N.t('options.status.swUnreachable'), 'err');
     btnTest.disabled = false;
     return;
   }
 
   if (result.noSite) {
-    setStatus('Jira 주소를 입력하고 저장한 뒤 테스트하세요.', 'err');
+    setStatus(I18N.t('options.status.noSite'), 'err');
   } else if (result.networkError) {
-    setStatus('네트워크 오류: 인터넷 연결을 확인하세요.', 'err');
+    setStatus(I18N.t('options.status.networkError'), 'err');
   } else if (result.status === 200) {
     // Passing the test but forgetting 저장 was a recurring trap — persist
     // the verified credentials immediately.
     chrome.storage.local.set({ jiraEmail: email, jiraToken: token }, () => {
       if (chrome.runtime.lastError) {
-        setStatus('연결 성공 (200 OK) — 자동 저장 실패. 저장 버튼을 눌러주세요.', 'err');
+        setStatus(I18N.t('options.status.testOkSaveFailed'), 'err');
         return;
       }
-      setStatus('연결 성공 (200 OK) — 인증 정보가 자동 저장되었습니다.', 'ok');
+      setStatus(I18N.t('options.status.testOkSaved'), 'ok');
     });
   } else if (result.status === 401) {
-    const lines = ['인증 실패 (401) — 이메일 또는 토큰을 확인하세요.'];
+    const lines = [I18N.t('options.status.auth401')];
     if (result.reason === 'EMPTY_INPUT') {
-      lines.push('이메일 또는 토큰이 비어 있는 상태로 전송되었습니다.');
+      lines.push(I18N.t('options.status.emptyInput'));
     } else {
-      lines.push(`전송된 값: 이메일 ${result.emailLength}자 / 토큰 ${result.tokenLength}자`);
-      if (result.reason) lines.push(`서버 사유: ${result.reason}`);
+      lines.push(I18N.t('options.status.sentLengths', { email: result.emailLength, token: result.tokenLength }));
+      if (result.reason) lines.push(I18N.t('options.status.serverReason', { reason: result.reason }));
     }
     if (result.denied) {
-      lines.push(`추가 사유: ${result.denied} — CAPTCHA 잠금일 수 있습니다. 브라우저에서 Jira에 로그인한 뒤 다시 시도하세요.`);
+      lines.push(I18N.t('options.status.denied', { reason: result.denied }));
     }
     if (result.headerNames) {
-      lines.push(`응답 헤더: ${result.headerNames}`);
+      lines.push(I18N.t('options.status.respHeaders', { headers: result.headerNames }));
     }
     setStatus(lines.join('\n'), 'err');
   } else if (result.status === 403) {
-    setStatus('권한 부족 (403) — 계정에 API 접근 권한이 없습니다.', 'err');
+    setStatus(I18N.t('options.status.forbidden'), 'err');
   } else {
-    setStatus(`예상치 못한 응답 코드: ${result.status}`, 'err');
+    setStatus(I18N.t('options.status.unexpected', { status: result.status }), 'err');
   }
 
   btnTest.disabled = false;

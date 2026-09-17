@@ -641,7 +641,7 @@ function issueOpenAction(issueKey) {
   const key = normalizeIssueKey(issueKey);
   if (!key) return undefined;
   return {
-    label: '이슈 열기',
+    label: I18N.t('cs.toast.openIssue'),
     onClick: () => {
       openIssueInJira(key);
     },
@@ -791,7 +791,7 @@ function showIssueDialog(issueKey, issue) {
   const assigneeEl = document.getElementById('gj-issue-dialog-assignee');
 
   if (keyEl) keyEl.textContent = issueKey;
-  if (summaryEl) summaryEl.textContent = issue.summary || '(제목 없음)';
+  if (summaryEl) summaryEl.textContent = issue.summary || I18N.t('cs.dialog.noSummary');
   if (statusEl) statusEl.textContent = `Status: ${issue.status || '-'}`;
   if (assigneeEl) assigneeEl.textContent = `Assignee: ${issue.assignee || 'Unassigned'}`;
 
@@ -801,11 +801,11 @@ function showIssueDialog(issueKey, issue) {
 async function handleFabIssueLookup() {
   const ctx = extractContext();
   if (!ctx.issueKey) {
-    showToast('PROJ-123 같은 이슈키가 필요합니다. 제목 또는 jira: KEY를 확인하세요.', 'warn');
+    showToast(I18N.t('cs.error.noIssueKey'), 'warn');
     return;
   }
 
-  showToast(`이슈 조회 중: ${ctx.issueKey}`, 'info');
+  showToast(I18N.t('cs.toast.lookingUp', { key: ctx.issueKey }), 'info');
 
   try {
     const resp = await sendRuntimeMessage({
@@ -814,28 +814,28 @@ async function handleFabIssueLookup() {
     });
 
     if (!resp?.ok) {
-      showToast(resp?.message || '이슈 조회에 실패했습니다.', 'error');
+      showToast(resp?.message || I18N.t('sw.error.lookupIssue'), 'error');
       return;
     }
 
     showIssueDialog(ctx.issueKey, resp.issue);
-    showToast(`이슈 조회 완료: ${ctx.issueKey}`, 'success');
+    showToast(I18N.t('cs.toast.lookupDone', { key: ctx.issueKey }), 'success');
   } catch {
-    showToast('요청 중 오류가 발생했습니다.', 'error');
+    showToast(I18N.t('cs.toast.requestError'), 'error');
   }
 }
 
 async function handleFabAddRemoteLink() {
-  showToast('웹링크 추가 중...', 'info');
+  showToast(I18N.t('cs.toast.linking'), 'info');
   try {
     const resp = await sendRuntimeMessage({ type: MSG.POPUP_ADD_REMOTE_LINK });
     if (!resp?.ok) {
-      showToast(resp?.message || '웹링크 추가에 실패했습니다.', 'error');
+      showToast(resp?.message || I18N.t('sw.error.remoteLinkFailed'), 'error');
       return;
     }
-    showToast(`웹링크 추가 완료: ${resp.issueKey || ''}`.trim(), 'success');
+    showToast(I18N.t('cs.toast.linkDone', { key: resp.issueKey || '' }).trim(), 'success');
   } catch {
-    showToast('요청 중 오류가 발생했습니다.', 'error');
+    showToast(I18N.t('cs.toast.requestError'), 'error');
   }
 }
 
@@ -843,7 +843,7 @@ async function requestAddComment() {
   const resp = await sendRuntimeMessage({ type: MSG.POPUP_ADD_COMMENT });
   if (resp?.duplicate) {
     const proceed = window.confirm(
-      `${resp.issueKey}에 이 change의 코멘트가 이미 있습니다.\n그래도 새 코멘트를 생성할까요?`,
+      I18N.t('cs.confirm.duplicateComment', { issueKey: resp.issueKey }),
     );
     if (!proceed) return { ok: false, cancelled: true };
     return sendRuntimeMessage({ type: MSG.POPUP_ADD_COMMENT, force: true });
@@ -852,45 +852,45 @@ async function requestAddComment() {
 }
 
 async function handleFabAddComment() {
-  showToast('코멘트 생성 중...', 'info');
+  showToast(I18N.t('cs.toast.commenting'), 'info');
   try {
     const resp = await requestAddComment();
     if (resp?.cancelled) {
-      showToast('코멘트 생성을 취소했습니다.', 'info');
+      showToast(I18N.t('cs.toast.commentCancelled'), 'info');
       return;
     }
     if (!resp?.ok) {
-      showToast(resp?.message || '코멘트 생성에 실패했습니다.', 'error');
+      showToast(resp?.message || I18N.t('sw.error.commentFailed'), 'error');
       return;
     }
-    showToast(`코멘트 생성 완료: ${resp.issueKey || ''}`.trim(), 'success', issueOpenAction(resp.issueKey));
+    showToast(I18N.t('cs.toast.commentDone', { key: resp.issueKey || '' }).trim(), 'success', issueOpenAction(resp.issueKey));
   } catch {
-    showToast('요청 중 오류가 발생했습니다.', 'error');
+    showToast(I18N.t('cs.toast.requestError'), 'error');
   }
 }
 
 async function handleFabQuickApply() {
-  showToast('반영 처리 중...', 'info');
+  showToast(I18N.t('cs.toast.applying'), 'info');
   try {
     let resp = await sendRuntimeMessage({ type: MSG.POPUP_QUICK_APPLY });
     if (resp?.duplicate) {
       const proceed = window.confirm(
-        `${resp.issueKey}에 이 change의 코멘트가 이미 있습니다.\n그래도 반영 처리(웹링크+코멘트)를 진행할까요?`,
+        I18N.t('cs.confirm.duplicateApply', { issueKey: resp.issueKey }),
       );
       if (!proceed) {
-        showToast('반영 처리를 취소했습니다.', 'info');
+        showToast(I18N.t('cs.toast.applyCancelled'), 'info');
         return;
       }
       resp = await sendRuntimeMessage({ type: MSG.POPUP_QUICK_APPLY, force: true });
     }
 
     if (!resp?.ok) {
-      showToast(resp?.message || '반영 처리에 실패했습니다.', 'error');
+      showToast(resp?.message || I18N.t('sw.error.applyFailed'), 'error');
       return;
     }
-    showToast(resp.message || `반영 처리 완료: ${resp.issueKey || ''}`.trim(), 'success', issueOpenAction(resp.issueKey));
+    showToast(resp.message || I18N.t('cs.toast.applyDone', { key: resp.issueKey || '' }).trim(), 'success', issueOpenAction(resp.issueKey));
   } catch {
-    showToast('요청 중 오류가 발생했습니다.', 'error');
+    showToast(I18N.t('cs.toast.requestError'), 'error');
   }
 }
 
@@ -898,7 +898,7 @@ async function handleFabOpenOptions() {
   try {
     await sendRuntimeMessage({ type: MSG.OPEN_OPTIONS });
   } catch {
-    showToast('설정 페이지를 열 수 없습니다.', 'error');
+    showToast(I18N.t('cs.toast.optionsFailed'), 'error');
   }
 }
 
@@ -906,14 +906,17 @@ function openJiraIssueInNewTab() {
   const ctx = extractContext();
   const key = normalizeIssueKey(ctx.issueKey);
   if (!key) {
-    showToast('이슈키를 찾을 수 없습니다.', 'warn');
+    showToast(I18N.t('cs.toast.noIssueKeyFound'), 'warn');
     return;
   }
 
   openIssueInJira(key);
 }
 
-function buildFabActionButton({ id, icon, title, onClick, iconSvg }) {
+function buildFabActionButton({ id, icon, titleKey, onClick, iconSvg }) {
+  // Resolved here, not in FAB_ACTION_DEFS: that array is built at load time,
+  // before the stored language has been read.
+  const title = I18N.t(titleKey);
   const btn = document.createElement('button');
   btn.id = id;
   btn.type = 'button';
@@ -972,14 +975,14 @@ const FAB_ACTION_DEFS = [
     key: 'openIssue',
     id: 'gj-fab-open-issue',
     iconSvg: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7"></path><path d="M10 14 21 3"></path><path d="M21 14v7h-7"></path><path d="M3 10v11h11"></path></svg>',
-    title: '이슈 페이지 이동',
+    titleKey: 'cs.fab.openIssue',
     onClick: () => openJiraIssueInNewTab(),
   },
-  { key: 'lookup', id: 'gj-fab-issue', icon: '🔍', title: '이슈 조회', onClick: () => handleFabIssueLookup() },
-  { key: 'link', id: 'gj-fab-link', icon: '🔗', title: '웹링크 추가', onClick: () => handleFabAddRemoteLink() },
-  { key: 'comment', id: 'gj-fab-comment', icon: '💬', title: '코멘트 생성', onClick: () => handleFabAddComment() },
-  { key: 'apply', id: 'gj-fab-apply', icon: '⚡', title: '반영 처리', onClick: () => handleFabQuickApply() },
-  { key: 'options', id: 'gj-fab-options', icon: '⚙️', title: '설정', onClick: () => handleFabOpenOptions() },
+  { key: 'lookup', id: 'gj-fab-issue', icon: '🔍', titleKey: 'cs.fab.lookup', onClick: () => handleFabIssueLookup() },
+  { key: 'link', id: 'gj-fab-link', icon: '🔗', titleKey: 'cs.fab.link', onClick: () => handleFabAddRemoteLink() },
+  { key: 'comment', id: 'gj-fab-comment', icon: '💬', titleKey: 'cs.fab.comment', onClick: () => handleFabAddComment() },
+  { key: 'apply', id: 'gj-fab-apply', icon: '⚡', titleKey: 'cs.fab.apply', onClick: () => handleFabQuickApply() },
+  { key: 'options', id: 'gj-fab-options', icon: '⚙️', titleKey: 'cs.fab.options', onClick: () => handleFabOpenOptions() },
 ];
 
 // -- FAB position (drag & persist) ---------------------------------------------
@@ -1207,7 +1210,7 @@ function setFabMainState(detected) {
   const main = document.getElementById('gj-fab-main');
   if (!main) return;
   main.style.background = detected ? '#1565c0' : '#8a94a6';
-  main.title = detected ? 'Jira 빠른 액션' : 'Jira 이슈키 미감지 (커밋 메시지에 jira: KEY 필요)';
+  main.title = I18N.t(detected ? 'cs.fab.mainTitle' : 'cs.fab.mainTitleNoKey');
 }
 
 function ensureStatusPill(root, issueKey) {
@@ -1216,7 +1219,7 @@ function ensureStatusPill(root, issueKey) {
     pill = document.createElement('button');
     pill.id = STATUS_PILL_ID;
     pill.type = 'button';
-    pill.title = 'Jira 이슈 열기';
+    pill.title = I18N.t('cs.pill.title');
     Object.assign(pill.style, {
       justifySelf: 'end',
       display: 'flex',
@@ -1393,7 +1396,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   // Jira URL can change while this tab stays open; without this the issue link
   // would keep pointing at the previous site until reload.
   if (changes.jiraBase) jiraBase = changes.jiraBase.newValue || '';
-  if (!changes.fabEnabled && !changes.fabActions && !changes.showStatusPill) return;
+  // Language changes must redraw the FAB too: its labels are baked in at build time.
+  if (changes.uiLanguage) I18N.setLang(changes.uiLanguage.newValue || 'auto');
+  if (!changes.uiLanguage && !changes.fabEnabled && !changes.fabActions && !changes.showStatusPill) return;
   removeFab();
   initFabFromStorage();
 });
@@ -1427,10 +1432,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return false;
 });
 
-initFabFromStorage();
+// Language first: every label the FAB renders is resolved at build time.
+I18N.init(() => {
+  initFabFromStorage();
 
-// Enrich context from Gerrit detail API on initial load so the FAB state and
-// status pill reflect the current change without user interaction.
-if (isChangePage()) {
-  fetchGerritDetailContext().then(() => refreshFabIssueState());
-}
+  // Enrich context from Gerrit detail API on initial load so the FAB state and
+  // status pill reflect the current change without user interaction.
+  if (isChangePage()) {
+    fetchGerritDetailContext().then(() => refreshFabIssueState());
+  }
+});
