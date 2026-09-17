@@ -33,7 +33,7 @@ directly from the extension. There is no server in between, and no account to si
 
 ## Install
 
-**From the Chrome Web Store:** _pending review, link goes here._
+**From the Chrome Web Store:** [Changelink for Gerrit and Jira Cloud](https://chromewebstore.google.com/detail/jebbalmncnfhgcfgpkomacgmelhbfdcl) (in review; the link goes live once it passes)
 
 **From source:**
 
