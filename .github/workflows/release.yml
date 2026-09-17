@@ -49,9 +49,10 @@ jobs:
 
       - name: Build extension zip
         run: |
-          ZIP_NAME="gerrit-jira-automation-${{ steps.release.outputs.TAG }}.zip"
+          ZIP_NAME="changelink-${{ steps.release.outputs.TAG }}.zip"
           zip -r "$ZIP_NAME" \
             manifest.json \
+            icons \
             message_types.js \
             content_script.js \
             service_worker.js \
@@ -65,16 +66,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release.outputs.TAG }}
-          name: "Gerrit Jira Tools ${{ steps.release.outputs.TAG }}"
+          name: "Changelink ${{ steps.release.outputs.TAG }}"
           generate_release_notes: true
           files: ${{ env.ZIP_NAME }}
           body: |
             ## 설치 방법
 
-            1. 아래 **Assets** 에서 `gerrit-jira-automation-${{ steps.release.outputs.TAG }}.zip` 다운로드
+            1. 아래 **Assets** 에서 `changelink-${{ steps.release.outputs.TAG }}.zip` 다운로드
             2. Chrome 주소창에 `chrome://extensions` 입력
             3. 우측 상단 **개발자 모드** 켜기
             4. zip 파일 압축 해제 후 **압축 해제된 확장 프로그램 로드** 클릭
-            5. 옵션 페이지에서 Jira URL / 이메일 / API 토큰 입력
+            5. 옵션 페이지에서 Gerrit URL / Jira URL / 이메일 / API 토큰 입력
 
             ---
