@@ -124,7 +124,7 @@ Jira 로 가는 요청의 `Authorization` 헤더 외에 나가지 않으며, 토
 올린다.
 
 ```bash
-git tag v1.5.1 && git push origin v1.5.1
+git tag v1.5.2 && git push origin v1.5.2
 ```
 
 ## 라이선스
