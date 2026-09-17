@@ -127,7 +127,7 @@ Push a `vX.Y.Z` tag and the release workflow syncs the manifest version, builds 
 and publishes a GitHub release.
 
 ```bash
-git tag v1.5.0 && git push origin v1.5.0
+git tag v1.5.1 && git push origin v1.5.1
 ```
 
 ## License
