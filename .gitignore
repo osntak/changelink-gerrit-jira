@@ -1,6 +1,8 @@
-node_modules/
 *.zip
 .DS_Store
+.claude/
 .idea/
-gerrit-jira-automation-v*/
 .omc/
+dist/
+gerrit-jira-automation-v*/
+node_modules/

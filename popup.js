@@ -2,11 +2,10 @@
 
 const MSG = self.MESSAGE_TYPES;
 
-const subjectEl = document.getElementById('subject');
-const issueCardEl = document.getElementById('issue-card');
-const issueSummaryEl = document.getElementById('issue-summary');
-const issueStatusEl = document.getElementById('issue-status');
+const issueTitleEl = document.getElementById('issue-title');
+const issueStatusSelectEl = /** @type {HTMLSelectElement} */ (document.getElementById('issue-status-select'));
 const issueAssigneeEl = document.getElementById('issue-assignee');
+const issueCommentStateEl = document.getElementById('issue-comment-state');
 const statusEl = document.getElementById('status');
 const btnRefresh = document.getElementById('btn-refresh');
 const btnApply = document.getElementById('btn-apply');
@@ -16,8 +15,6 @@ const fabEnabledEl = document.getElementById('fab-enabled');
 const btnOptions = document.getElementById('btn-options');
 const issueKeyInputEl = document.getElementById('issue-key-input');
 const btnOpenIssue = document.getElementById('btn-open-issue');
-const transitionSelectEl = document.getElementById('transition-select');
-const btnTransition = document.getElementById('btn-transition');
 const btnRowEl = document.getElementById('btn-row');
 const previewPanelEl = document.getElementById('preview-panel');
 const previewTitleEl = document.getElementById('preview-title');
@@ -28,9 +25,13 @@ const btnPreviewCancel = document.getElementById('btn-preview-cancel');
 
 let currentContext = null;
 let authConfigured = true;
+let currentIssueStatus = '';
+let commentDuplicate = null; // null = unknown, true/false = checked
 let previewEnabled = true;
 let previewMode = null; // 'comment' | 'apply'
-const JIRA_BASE = 'https://yourcompany.atlassian.net';
+// Jira site URL is user-configured in options.
+let jiraBase = '';
+chrome.storage.local.get(['jiraBase'], ({ jiraBase: saved }) => { jiraBase = saved || ''; });
 
 function setStatus(message, cls) {
   statusEl.textContent = message;
@@ -69,11 +70,46 @@ function setActionBusy(isBusy) {
 
 function renderContext(context) {
   currentContext = context;
-  subjectEl.textContent = context.subject || '(제목 없음)';
+  // Gerrit subject를 우선 표시; 이슈 조회가 성공하면 Jira 제목으로 대체된다.
+  issueTitleEl.textContent = context.subject || '-';
   if (!issueKeyInputEl.value && context.issueKey) {
     issueKeyInputEl.value = context.issueKey;
   }
   syncActionButtons();
+  updateApplyEmphasis();
+}
+
+function isChangeMerged() {
+  return !!currentContext?.submittedAt;
+}
+
+// 머지된 change인데 아직 코멘트가 안 달렸으면 반영 처리를 강조한다.
+function updateApplyEmphasis() {
+  const emphasize = isChangeMerged() && commentDuplicate !== true;
+  btnApply.classList.toggle('primary', emphasize);
+  btnApply.title = emphasize ? '머지된 change입니다. Jira에 반영 처리하세요.' : '';
+}
+
+function renderCommentState() {
+  if (commentDuplicate === true) {
+    issueCommentStateEl.textContent = '💬 이 change의 코멘트가 이미 등록되어 있습니다';
+    issueCommentStateEl.style.display = 'block';
+  } else {
+    issueCommentStateEl.style.display = 'none';
+  }
+  updateApplyEmphasis();
+}
+
+async function checkCommentState(issueKey) {
+  commentDuplicate = null;
+  renderCommentState();
+  try {
+    const resp = await sendMessage({ type: MSG.POPUP_CHECK_COMMENT, issueKeyOverride: issueKey });
+    if (resp?.ok) commentDuplicate = !!resp.duplicate;
+  } catch {
+    // Comment-state badge is optional UI; keep unknown on failure.
+  }
+  renderCommentState();
 }
 
 function normalizeIssueKey(key) {
@@ -93,7 +129,8 @@ function getEffectiveIssueKey() {
 }
 
 function buildIssueUrl(issueKey) {
-  return `${JIRA_BASE}/browse/${encodeURIComponent(issueKey)}`;
+  if (!jiraBase) return '';
+  return `${jiraBase}/browse/${encodeURIComponent(issueKey)}`;
 }
 
 function loadFabSetting() {
@@ -118,21 +155,29 @@ async function loadAuthState() {
 }
 
 function renderIssueCard(issue) {
-  issueSummaryEl.textContent = issue.summary || '(제목 없음)';
-  issueStatusEl.textContent = `Status: ${issue.status || '-'}`;
-  issueAssigneeEl.textContent = `Assignee: ${issue.assignee || 'Unassigned'}`;
-  issueCardEl.style.display = 'block';
+  if (issue.summary) issueTitleEl.textContent = issue.summary;
+  currentIssueStatus = issue.status || '';
+  issueAssigneeEl.textContent = issue.assignee || 'Unassigned';
+  resetTransitionUi();
 }
 
 function hideIssueCard() {
-  issueCardEl.style.display = 'none';
+  issueTitleEl.textContent = currentContext?.subject || '-';
+  issueAssigneeEl.textContent = '-';
+  currentIssueStatus = '';
+  commentDuplicate = null;
+  renderCommentState();
   resetTransitionUi();
 }
 
 function resetTransitionUi() {
-  transitionSelectEl.innerHTML = '<option value="">상태 변경...</option>';
-  transitionSelectEl.disabled = true;
-  btnTransition.disabled = true;
+  issueStatusSelectEl.innerHTML = '';
+  const current = document.createElement('option');
+  current.value = '';
+  current.textContent = currentIssueStatus || '-';
+  issueStatusSelectEl.appendChild(current);
+  issueStatusSelectEl.value = '';
+  issueStatusSelectEl.disabled = true;
 }
 
 function renderTransitions(transitions) {
@@ -140,14 +185,14 @@ function renderTransitions(transitions) {
   if (!Array.isArray(transitions) || transitions.length === 0) return;
 
   for (const t of transitions) {
+    const target = t.toStatus || t.name;
+    if (currentIssueStatus && target === currentIssueStatus) continue;
     const option = document.createElement('option');
     option.value = t.id;
-    option.textContent = t.toStatus && t.toStatus !== t.name
-      ? `${t.name} → ${t.toStatus}`
-      : t.name;
-    transitionSelectEl.appendChild(option);
+    option.textContent = target;
+    issueStatusSelectEl.appendChild(option);
   }
-  transitionSelectEl.disabled = false;
+  issueStatusSelectEl.disabled = issueStatusSelectEl.options.length <= 1;
 }
 
 async function loadTransitions(issueKey) {
@@ -165,12 +210,11 @@ async function loadTransitions(issueKey) {
 
 async function applyTransition() {
   const issueKey = getEffectiveIssueKey();
-  const transitionId = transitionSelectEl.value;
+  const transitionId = issueStatusSelectEl.value;
   if (!issueKey || !transitionId) return;
 
   setActionBusy(true);
-  transitionSelectEl.disabled = true;
-  btnTransition.disabled = true;
+  issueStatusSelectEl.disabled = true;
   setStatus('상태 변경 중...', '');
   try {
     const resp = await sendMessage({
@@ -180,16 +224,16 @@ async function applyTransition() {
     });
     if (!resp?.ok) {
       setStatus(resp?.message || '상태 변경에 실패했습니다.', 'err');
-      transitionSelectEl.disabled = false;
-      btnTransition.disabled = false;
+      issueStatusSelectEl.value = '';
+      issueStatusSelectEl.disabled = false;
       return;
     }
     setStatus(`상태 변경 완료: ${issueKey}`, 'ok');
     await fetchIssue();
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
-    transitionSelectEl.disabled = false;
-    btnTransition.disabled = false;
+    issueStatusSelectEl.value = '';
+    issueStatusSelectEl.disabled = false;
   } finally {
     setActionBusy(false);
   }
@@ -213,7 +257,7 @@ async function loadContext() {
     if (!resp?.ok) {
       hideIssueCard();
       currentContext = null;
-      subjectEl.textContent = '-';
+      issueTitleEl.textContent = '-';
       syncActionButtons();
       setStatus(resp?.message || 'Gerrit 페이지를 찾을 수 없습니다.', 'warn');
       return false;
@@ -288,7 +332,7 @@ async function fetchIssue() {
 
     renderIssueCard(resp.issue);
     setStatus(`이슈 조회 완료: ${issueKey}`, 'ok');
-    await loadTransitions(issueKey);
+    await Promise.all([loadTransitions(issueKey), checkCommentState(issueKey)]);
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
   } finally {
@@ -359,6 +403,8 @@ async function addComment() {
       return;
     }
     setStatus(`코멘트 생성 완료: ${issueKey}`, 'ok');
+    commentDuplicate = true;
+    renderCommentState();
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
   } finally {
@@ -397,6 +443,8 @@ async function applyLinkAndComment() {
       return;
     }
     setStatus(resp.message || `반영 처리 완료: ${issueKey}`, 'ok');
+    commentDuplicate = true;
+    renderCommentState();
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
   } finally {
@@ -406,16 +454,10 @@ async function applyLinkAndComment() {
 
 // -- Editable comment preview ---------------------------------------------------
 
-let previewHidIssueCard = false;
-
 function closePreview() {
   previewMode = null;
   previewPanelEl.style.display = 'none';
   btnRowEl.style.display = 'grid';
-  if (previewHidIssueCard) {
-    issueCardEl.style.display = 'block';
-    previewHidIssueCard = false;
-  }
 }
 
 async function openPreview(mode) {
@@ -443,8 +485,6 @@ async function openPreview(mode) {
     previewDupEl.textContent = resp.duplicate ? '⚠ 이미 이 change의 코멘트가 있습니다' : '';
     previewTitleEl.textContent = mode === 'apply' ? '반영 처리 — 코멘트 미리보기' : '코멘트 미리보기';
     btnPreviewSubmit.textContent = mode === 'apply' ? '반영 처리 실행' : '코멘트 등록';
-    previewHidIssueCard = issueCardEl.style.display === 'block';
-    if (previewHidIssueCard) issueCardEl.style.display = 'none';
     btnRowEl.style.display = 'none';
     previewPanelEl.style.display = 'block';
     setStatus('내용 확인/수정 후 실행하세요.', '');
@@ -481,6 +521,8 @@ async function submitPreview() {
     }
     closePreview();
     setStatus(resp.message || `${mode === 'apply' ? '반영 처리' : '코멘트 생성'} 완료: ${issueKey}`, 'ok');
+    commentDuplicate = true;
+    renderCommentState();
   } catch {
     setStatus('요청 중 오류가 발생했습니다.', 'err');
   } finally {
@@ -495,7 +537,12 @@ function openIssuePage() {
     setStatus('이슈키를 먼저 확인하세요.', 'warn');
     return;
   }
-  chrome.tabs.create({ url: buildIssueUrl(issueKey) });
+  const url = buildIssueUrl(issueKey);
+  if (!url) {
+    setStatus('설정에서 Jira 주소를 먼저 입력하세요.', 'warn');
+    return;
+  }
+  chrome.tabs.create({ url });
   window.close();
 }
 
@@ -544,10 +591,9 @@ btnOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
 btnOpenIssue.addEventListener('click', openIssuePage);
-transitionSelectEl.addEventListener('change', () => {
-  btnTransition.disabled = !transitionSelectEl.value;
+issueStatusSelectEl.addEventListener('change', () => {
+  if (issueStatusSelectEl.value) applyTransition();
 });
-btnTransition.addEventListener('click', applyTransition);
 
 (async () => {
   currentContext = null;

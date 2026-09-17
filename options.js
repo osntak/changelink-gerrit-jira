@@ -11,6 +11,8 @@
 
 const MSG = self.MESSAGE_TYPES;
 
+const gerritUrlEl = /** @type {HTMLInputElement} */ (document.getElementById('gerrit-url'));
+const jiraUrlEl   = /** @type {HTMLInputElement} */ (document.getElementById('jira-url'));
 const emailEl    = /** @type {HTMLInputElement}  */ (document.getElementById('email'));
 const tokenEl    = /** @type {HTMLInputElement}  */ (document.getElementById('token'));
 const templateEl = /** @type {HTMLTextAreaElement} */ (document.getElementById('template'));
@@ -18,6 +20,7 @@ const statusEl   = document.getElementById('status');
 const btnSave    = document.getElementById('btn-save');
 const btnTest    = document.getElementById('btn-test');
 const btnReset   = document.getElementById('btn-reset');
+const btnTokenVisibility = document.getElementById('btn-token-visibility');
 
 const optPreviewEl        = /** @type {HTMLInputElement} */ (document.getElementById('opt-preview'));
 const optPillEl           = /** @type {HTMLInputElement} */ (document.getElementById('opt-pill'));
@@ -62,15 +65,19 @@ function setStatus(msg, cls, autoClearMs) {
 
 chrome.storage.local.get(
   [
+    'gerritOrigin', 'jiraBase',
     'jiraEmail', 'jiraToken', 'commentTemplate',
     'previewEnabled', 'showStatusPill',
     'applyTransitionEnabled', 'applyTransitionName', 'fabActions',
   ],
   ({
+    gerritOrigin, jiraBase,
     jiraEmail, jiraToken, commentTemplate,
     previewEnabled, showStatusPill,
     applyTransitionEnabled, applyTransitionName, fabActions,
   }) => {
+    if (gerritOrigin) gerritUrlEl.value = gerritOrigin;
+    if (jiraBase) jiraUrlEl.value = jiraBase;
     if (jiraEmail) emailEl.value = jiraEmail;
     if (jiraToken) tokenEl.value = jiraToken;
     // Show saved template; initialize with default when not set yet.
@@ -119,11 +126,74 @@ function loadStatusOptions(selected) {
   });
 }
 
+// ── Token visibility ──────────────────────────────────────────────────────────
+
+btnTokenVisibility.addEventListener('click', () => {
+  const show = tokenEl.type === 'password';
+  tokenEl.type = show ? 'text' : 'password';
+  btnTokenVisibility.classList.toggle('on', show);
+  btnTokenVisibility.setAttribute('aria-pressed', String(show));
+  btnTokenVisibility.setAttribute('aria-label', show ? '토큰 숨기기' : '토큰 표시');
+});
+
+// ── Site URLs ─────────────────────────────────────────────────────────────────
+
+/** @returns {string} origin without trailing slash, or '' when invalid */
+function normalizeOrigin(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Host permissions are optional in the manifest, so they must be requested from
+ * inside the click handler: Chrome rejects the prompt without a user gesture.
+ */
+function requestSitePermissions(origins) {
+  return new Promise((resolve) => {
+    chrome.permissions.request({ origins }, (granted) => {
+      resolve(!chrome.runtime.lastError && granted);
+    });
+  });
+}
+
+function notifySitesChanged() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: MSG.SET_SITES }, (response) => {
+      resolve(!chrome.runtime.lastError && response);
+    });
+  });
+}
+
 // ── Save ──────────────────────────────────────────────────────────────────────
 
-btnSave.addEventListener('click', () => {
+btnSave.addEventListener('click', async () => {
   const email = emailEl.value.trim();
   const token = tokenEl.value.trim();
+
+  const gerritOrigin = normalizeOrigin(gerritUrlEl.value);
+  const jiraBase = normalizeOrigin(jiraUrlEl.value);
+
+  if (gerritUrlEl.value.trim() && !gerritOrigin) {
+    setStatus('Gerrit 주소는 https://gerrit.example.com 형식으로 입력하세요.', 'err');
+    return;
+  }
+  if (jiraUrlEl.value.trim() && !jiraBase) {
+    setStatus('Jira 주소는 https://yourcompany.atlassian.net 형식으로 입력하세요.', 'err');
+    return;
+  }
+
+  const wanted = [];
+  if (gerritOrigin) wanted.push(`${gerritOrigin}/*`);
+  if (jiraBase) wanted.push(`${jiraBase}/*`);
+  if (wanted.length && !(await requestSitePermissions(wanted))) {
+    setStatus('사이트 접근 권한이 없으면 동작하지 않습니다. 저장을 다시 눌러 허용하세요.', 'err');
+    return;
+  }
 
   if ((email && !token) || (!email && token)) {
     setStatus('이메일과 토큰은 함께 입력하거나 둘 다 비워두세요.', 'err');
@@ -145,6 +215,8 @@ btnSave.addEventListener('click', () => {
 
   const transitionName = optTransitionNameEl.value.trim();
   const payload = {
+    gerritOrigin,
+    jiraBase,
     commentTemplate: templateVal,
     previewEnabled: optPreviewEl.checked,
     showStatusPill: optPillEl.checked,
@@ -163,6 +235,9 @@ btnSave.addEventListener('click', () => {
       setStatus('저장 중 오류가 발생했습니다.', 'err');
       return;
     }
+
+    // Re-register the Gerrit content script for the newly saved host.
+    notifySitesChanged();
 
     // When fields are empty, clear previously saved credentials.
     if (!email && !token) {
@@ -225,7 +300,9 @@ btnTest.addEventListener('click', async () => {
     return;
   }
 
-  if (result.networkError) {
+  if (result.noSite) {
+    setStatus('Jira 주소를 입력하고 저장한 뒤 테스트하세요.', 'err');
+  } else if (result.networkError) {
     setStatus('네트워크 오류: 인터넷 연결을 확인하세요.', 'err');
   } else if (result.status === 200) {
     // Passing the test but forgetting 저장 was a recurring trap — persist

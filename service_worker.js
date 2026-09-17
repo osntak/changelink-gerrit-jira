@@ -8,13 +8,29 @@ importScripts('message_types.js');
 
 const MSG = self.MESSAGE_TYPES;
 
-const GERRIT_ORIGINS = [
-  'http://gerrit.example.com',
-  'https://gerrit.example.com',
-];
+// Gerrit and Jira URLs come from user settings. Nothing is hardcoded to one site.
+// Kept in a module cache and reloaded before every message dispatch, because the
+// service worker can be torn down at any time.
+let sites = { gerritOrigin: '', jiraBase: '' };
 
-const JIRA_BASE = 'https://yourcompany.atlassian.net';
-const JIRA_ALLOWED_HOST = 'yourcompany.atlassian.net';
+function normalizeOrigin(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
+async function loadSites() {
+  const stored = await chrome.storage.local.get(['gerritOrigin', 'jiraBase']);
+  sites = {
+    gerritOrigin: normalizeOrigin(stored.gerritOrigin),
+    jiraBase: normalizeOrigin(stored.jiraBase),
+  };
+  return sites;
+}
 
 const DEFAULT_TEMPLATE =
 `{title}
@@ -28,7 +44,7 @@ Change-Id: {change_id}`;
 
 function isGerritTab(url) {
   try {
-    return GERRIT_ORIGINS.includes(new URL(url).origin);
+    return !!sites.gerritOrigin && new URL(url).origin === sites.gerritOrigin;
   } catch {
     return false;
   }
@@ -37,7 +53,11 @@ function isGerritTab(url) {
 function isAllowedChangeUrl(url) {
   try {
     const parsed = new URL(url);
-    return GERRIT_ORIGINS.includes(parsed.origin) && /\/c\/.+\/\+\/\d+/.test(parsed.pathname);
+    return (
+      !!sites.gerritOrigin &&
+      parsed.origin === sites.gerritOrigin &&
+      /\/c\/.+\/\+\/\d+/.test(parsed.pathname)
+    );
   } catch {
     return false;
   }
@@ -47,12 +67,43 @@ function isValidIssueKey(key) {
   return typeof key === 'string' && /^[A-Z][A-Z0-9]+-\d+$/.test(key);
 }
 
-function assertAllowedJiraBase() {
-  const host = new URL(JIRA_BASE).hostname;
-  if (host !== JIRA_ALLOWED_HOST) {
-    throw new Error('Jira base URL is not allowed');
+function assertJiraConfigured() {
+  if (!sites.jiraBase) {
+    const error = new Error('Jira site URL is not configured');
+    error.code = 'no_site';
+    throw error;
   }
 }
+
+// Content script is registered dynamically: the Gerrit host is only known after
+// the user saves it in options and grants the host permission.
+async function registerGerritContentScript() {
+  const { gerritOrigin } = await loadSites();
+
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: ['gerrit'] });
+  } catch {
+    // Nothing registered yet.
+  }
+
+  if (!gerritOrigin) return false;
+
+  const granted = await chrome.permissions.contains({ origins: [`${gerritOrigin}/*`] });
+  if (!granted) return false;
+
+  await chrome.scripting.registerContentScripts([
+    {
+      id: 'gerrit',
+      matches: [`${gerritOrigin}/*`],
+      js: ['message_types.js', 'content_script.js'],
+      runAt: 'document_idle',
+    },
+  ]);
+  return true;
+}
+
+chrome.runtime.onInstalled.addListener(() => { registerGerritContentScript(); });
+chrome.runtime.onStartup.addListener(() => { registerGerritContentScript(); });
 
 function sendToTab(tabId, message) {
   return new Promise((resolve, reject) => {
@@ -143,6 +194,10 @@ function setFabEnabled(enabled) {
 }
 
 async function getActiveGerritContext() {
+  if (!sites.gerritOrigin) {
+    return { ok: false, message: '설정에서 Gerrit 주소를 먼저 입력하세요.' };
+  }
+
   const tab = await getActiveTab();
   if (!tab || !tab.id || !tab.url || !isGerritTab(tab.url)) {
     return {
@@ -356,7 +411,7 @@ const jiraClient = {
   },
 
   async fetch(path, options = {}) {
-    assertAllowedJiraBase();
+    assertJiraConfigured();
     const { email, token } = await this.getCredentials();
 
     const headers = {
@@ -366,7 +421,7 @@ const jiraClient = {
     };
 
     try {
-      return await fetch(`${JIRA_BASE}${path}`, {
+      return await fetch(`${sites.jiraBase}${path}`, {
         method: options.method || 'GET',
         headers,
         body: options.body ? JSON.stringify(options.body) : undefined,
@@ -730,6 +785,24 @@ async function handlePopupPreviewComment(issueKeyOverride) {
   }
 }
 
+async function handlePopupCheckComment(issueKeyOverride) {
+  const target = await resolveCommentTarget(issueKeyOverride);
+  if (!target.ok) return target;
+
+  try {
+    const duplicated = await jiraClient.hasGerritComment(
+      target.issueKey,
+      buildDuplicateNeedle(target.context),
+    );
+    return { ok: true, issueKey: target.issueKey, duplicate: duplicated };
+  } catch (err) {
+    return {
+      ok: false,
+      message: mapClientError(err, '코멘트 상태 확인에 실패했습니다.'),
+    };
+  }
+}
+
 async function handlePopupAddComment(issueKeyOverride, force, commentText) {
   const target = await resolveCommentTarget(issueKeyOverride);
   if (!target.ok) return target;
@@ -867,7 +940,14 @@ async function handlePopupSetFabEnabled(enabled) {
   }
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+function dispatchMessage(msg, sendResponse) {
+  if (msg.type === MSG.SET_SITES) {
+    registerGerritContentScript()
+      .then((registered) => sendResponse({ ok: true, registered }))
+      .catch((err) => sendResponse({ ok: false, message: String(err?.message || err) }));
+    return;
+  }
+
   if (msg.type === MSG.TEST_CONNECTION) {
     handleTestConnection(msg.email, msg.token).then(sendResponse);
     return true;
@@ -885,6 +965,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   if (msg.type === MSG.POPUP_GET_ISSUE) {
     handlePopupGetIssue(msg.issueKey).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === MSG.POPUP_CHECK_COMMENT) {
+    handlePopupCheckComment(msg.issueKeyOverride).then(sendResponse);
     return true;
   }
 
@@ -936,7 +1021,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  return false;
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  // Site URLs must be in the cache before any handler runs; the worker may have
+  // just been restarted.
+  loadSites().then(() => dispatchMessage(msg, sendResponse));
+  return true;
 });
 
 async function handleTestConnection(email, token) {
@@ -948,9 +1039,13 @@ async function handleTestConnection(email, token) {
     return { status: 401, reason: 'EMPTY_INPUT', emailLength, tokenLength };
   }
 
+  if (!sites.jiraBase) {
+    return { status: null, noSite: true };
+  }
+
   try {
-    assertAllowedJiraBase();
-    const resp = await fetch(`${JIRA_BASE}/rest/api/3/myself`, {
+    assertJiraConfigured();
+    const resp = await fetch(`${sites.jiraBase}/rest/api/3/myself`, {
       method: 'GET',
       headers: {
         Authorization: `Basic ${btoa(`${email}:${token}`)}`,
