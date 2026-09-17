@@ -37,7 +37,14 @@ let networkContextCache = {
   submittedAt: '',
 };
 
-const JIRA_BASE = 'https://yourcompany.atlassian.net';
+// Jira site URL is user-configured in options.
+let jiraBase = '';
+chrome.storage.local.get(['jiraBase'], ({ jiraBase: saved }) => { jiraBase = saved || ''; });
+
+function openIssueInJira(key) {
+  if (!jiraBase) return;
+  window.open(`${jiraBase}/browse/${encodeURIComponent(key)}`, '_blank', 'noopener,noreferrer');
+}
 let detailFetchInFlight = null;
 let detailFetchChangeNum = null;
 
@@ -636,7 +643,7 @@ function issueOpenAction(issueKey) {
   return {
     label: '이슈 열기',
     onClick: () => {
-      window.open(`${JIRA_BASE}/browse/${encodeURIComponent(key)}`, '_blank', 'noopener,noreferrer');
+      openIssueInJira(key);
     },
   };
 }
@@ -903,7 +910,7 @@ function openJiraIssueInNewTab() {
     return;
   }
 
-  window.open(`${JIRA_BASE}/browse/${encodeURIComponent(key)}`, '_blank', 'noopener,noreferrer');
+  openIssueInJira(key);
 }
 
 function buildFabActionButton({ id, icon, title, onClick, iconSvg }) {
@@ -1213,31 +1220,54 @@ function ensureStatusPill(root, issueKey) {
     Object.assign(pill.style, {
       justifySelf: 'end',
       display: 'flex',
+      flexDirection: 'column',
       alignItems: 'center',
-      gap: '6px',
-      height: '26px',
-      padding: '0 11px',
+      gap: '1px',
+      padding: '4px 12px',
       borderRadius: '13px',
       border: '1px solid rgba(21,101,192,0.35)',
       background: 'rgba(255,255,255,0.96)',
       color: '#1565c0',
       fontSize: '11.5px',
       fontWeight: '700',
+      lineHeight: '1.3',
       cursor: 'pointer',
       boxShadow: '0 3px 10px rgba(0,0,0,0.18)',
       whiteSpace: 'nowrap',
     });
+    const keyLine = document.createElement('span');
+    keyLine.id = `${STATUS_PILL_ID}-key`;
+    const statusLine = document.createElement('span');
+    statusLine.id = `${STATUS_PILL_ID}-status`;
+    Object.assign(statusLine.style, {
+      fontSize: '10.5px',
+      fontWeight: '600',
+      color: '#526074',
+      display: 'none',
+    });
+    pill.appendChild(keyLine);
+    pill.appendChild(statusLine);
     pill.addEventListener('click', (e) => {
       e.stopPropagation();
       const key = pill.getAttribute('data-issue-key');
       if (key) {
-        window.open(`${JIRA_BASE}/browse/${encodeURIComponent(key)}`, '_blank', 'noopener,noreferrer');
+        openIssueInJira(key);
       }
     });
     root.insertBefore(pill, root.firstChild);
   }
   pill.setAttribute('data-issue-key', issueKey);
   return pill;
+}
+
+function setStatusPillContent(pill, issueKey, status) {
+  const keyLine = pill.querySelector(`#${STATUS_PILL_ID}-key`);
+  const statusLine = pill.querySelector(`#${STATUS_PILL_ID}-status`);
+  if (keyLine) keyLine.textContent = issueKey;
+  if (statusLine) {
+    statusLine.textContent = status || '';
+    statusLine.style.display = status ? 'block' : 'none';
+  }
 }
 
 function removeStatusPill() {
@@ -1263,7 +1293,7 @@ async function refreshFabIssueState() {
 
   lastPillIssueKey = issueKey;
   const pill = ensureStatusPill(root, issueKey);
-  pill.textContent = issueKey;
+  setStatusPillContent(pill, issueKey, '');
 
   try {
     const resp = await sendRuntimeMessage({ type: MSG.POPUP_GET_ISSUE, issueKey });
@@ -1271,7 +1301,7 @@ async function refreshFabIssueState() {
     const current = document.getElementById(STATUS_PILL_ID);
     if (!current || current.getAttribute('data-issue-key') !== issueKey) return;
     if (resp?.ok && resp.issue?.status) {
-      current.textContent = `${issueKey} · ${resp.issue.status}`;
+      setStatusPillContent(current, issueKey, resp.issue.status);
     }
   } catch {
     // Keep bare issue key on lookup failure (e.g., credentials not configured).
@@ -1360,6 +1390,9 @@ function initFabFromStorage() {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
+  // Jira URL can change while this tab stays open; without this the issue link
+  // would keep pointing at the previous site until reload.
+  if (changes.jiraBase) jiraBase = changes.jiraBase.newValue || '';
   if (!changes.fabEnabled && !changes.fabActions && !changes.showStatusPill) return;
   removeFab();
   initFabFromStorage();

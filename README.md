@@ -19,7 +19,7 @@ npm run build
 
 생성 파일:
 
-- `gerrit-jira-automation-v1.3.0.zip` (manifest 버전에 따라 파일명 변경)
+- `gerrit-jira-automation-v1.4.0.zip` (manifest 버전에 따라 파일명 변경)
 
 ### 2) Chrome에 설치
 
@@ -33,9 +33,13 @@ npm run build
 
 1. 확장 아이콘 클릭
 2. 우측 상단 `⚙` 버튼(옵션) 클릭
-3. Jira 이메일 + Jira API 토큰 입력
-4. `저장` 클릭
-5. 필요 시 `연결 테스트` 실행
+3. Gerrit 주소 입력 (예: `https://gerrit.example.com`)
+4. Jira 주소 입력 (예: `https://yourcompany.atlassian.net`)
+5. Jira 이메일 + Jira API 토큰 입력
+6. `저장` 클릭. 두 사이트 접근 권한을 묻는 창이 뜨면 허용
+7. 필요 시 `연결 테스트` 실행
+
+Jira 는 Cloud 기준입니다. REST API v3 와 ADF 코멘트 형식을 사용하므로 Jira Server/Data Center 는 아직 지원하지 않습니다.
 
 Jira API 토큰 발급:
 
@@ -128,10 +132,8 @@ FAB 표시 요소:
 - 자격증명 저장: `chrome.storage.local`만 사용 (`sync` 미사용)
 - 토큰/이메일/Authorization 헤더 로그 노출 금지
 - Jira 응답은 상태코드 기반 메시지 + 오류 요약(`errorMessages`)만 발췌 표시 (본문 전체 미노출)
-- 고정 host permissions만 허용:
-  - `http://gerrit.example.com/*`
-  - `https://gerrit.example.com/*`
-  - `https://yourcompany.atlassian.net/*`
+- host permission 은 optional. 설정에서 저장한 Gerrit/Jira 주소에 대해서만 사용자가 직접 허용합니다
+- content script 도 저장된 Gerrit 주소에만 동적으로 등록합니다 (`chrome.scripting.registerContentScripts`)
 
 ## 6. 트러블슈팅
 

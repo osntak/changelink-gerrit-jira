@@ -66,30 +66,52 @@
       padding: 0;
     }
 
-    .kv {
-      margin-top: 6px;
-      display: grid;
-      gap: 3px;
-      color: var(--sub);
-      font-size: 12px;
+    .issue-title {
+      margin-top: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      word-break: break-word;
     }
 
-    .field {
+    .info-grid {
       margin-top: 8px;
       display: grid;
-      gap: 3px;
-      color: var(--sub);
+      grid-template-columns: 62px 1fr;
+      gap: 6px 8px;
+      align-items: center;
       font-size: 12px;
+      color: var(--sub);
     }
 
-    .field input {
+    .info-grid input {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 7px;
-      padding: 7px 9px;
+      padding: 6px 9px;
       font-size: 12px;
       color: var(--ink);
       background: #fff;
+    }
+
+    .info-grid select {
+      width: 100%;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 6px 8px;
+      font-size: 12px;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    .info-grid select:disabled {
+      border-color: transparent;
+      background: transparent;
+      opacity: 1;
+      appearance: none;
+      padding-left: 0;
+      color: var(--ink);
+      font-weight: 600;
     }
 
     .field-inline {
@@ -124,11 +146,28 @@
       display: block;
     }
 
+    .head-actions {
+      display: flex;
+      gap: 6px;
+    }
+
     .btn-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 6px;
       margin-top: 8px;
+    }
+
+    .btn-row .span2 {
+      grid-column: 1 / -1;
+    }
+
+    .comment-state {
+      display: none;
+      margin-top: 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--ok);
     }
 
     .preview-panel {
@@ -247,22 +286,6 @@
       cursor: not-allowed;
     }
 
-    .issue-card {
-      display: none;
-      margin-top: 8px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 10px;
-      background: #fbfdff;
-      font-size: 12px;
-    }
-
-    .issue-card .title {
-      font-weight: 700;
-      margin-bottom: 6px;
-      word-break: break-word;
-    }
-
     .status {
       min-height: 20px;
       border-radius: 8px;
@@ -271,28 +294,6 @@
       background: #ecf2fb;
       color: var(--pri);
       white-space: pre-line;
-    }
-
-    .transition-row {
-      margin-top: 8px;
-      display: flex;
-      gap: 6px;
-      align-items: center;
-    }
-
-    .transition-row select {
-      flex: 1;
-      min-width: 0;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 6px 8px;
-      font-size: 12px;
-      color: var(--ink);
-      background: #fff;
-    }
-
-    .transition-row button {
-      flex-shrink: 0;
     }
 
     .status.ok { background: #e8f5e9; color: var(--ok); }
@@ -305,15 +306,15 @@
     <section class="panel">
       <div class="head-row">
         <h1>Gerrit Jira Tools</h1>
-        <button id="btn-options" class="icon-btn" title="설정 열기" aria-label="설정 열기">⚙</button>
+        <div class="head-actions">
+          <button id="btn-refresh" class="icon-btn" title="이슈 다시 조회" aria-label="이슈 다시 조회">↻</button>
+          <button id="btn-options" class="icon-btn" title="설정 열기" aria-label="설정 열기">⚙</button>
+        </div>
       </div>
-      <div class="kv">
-        <div>Subject</div>
-        <div id="subject" class="value">-</div>
-      </div>
+      <div id="issue-title" class="issue-title">-</div>
 
-      <div class="field">
-        <label for="issue-key-input">Issue key</label>
+      <div class="info-grid">
+        <span>Issue</span>
         <div class="field-inline">
           <input id="issue-key-input" type="text" placeholder="PROJ-123">
           <button id="btn-open-issue" class="arrow-btn" title="이슈 페이지 이동" aria-label="이슈 페이지 이동">
@@ -325,11 +326,17 @@
             </svg>
           </button>
         </div>
+        <span>Status</span>
+        <select id="issue-status-select" aria-label="상태 변경" disabled>
+          <option value="">-</option>
+        </select>
+        <span>Assignee</span>
+        <div id="issue-assignee" class="value">-</div>
       </div>
+      <div id="issue-comment-state" class="comment-state"></div>
 
       <div id="btn-row" class="btn-row">
-        <button id="btn-refresh" class="primary">이슈 조회</button>
-        <button id="btn-apply">⚡ 반영 처리</button>
+        <button id="btn-apply" class="span2">⚡ 반영 처리</button>
         <button id="btn-link">웹링크 추가</button>
         <button id="btn-comment">코멘트 생성</button>
       </div>
@@ -354,17 +361,6 @@
         </label>
       </div>
 
-      <div id="issue-card" class="issue-card">
-        <div id="issue-summary" class="title"></div>
-        <div id="issue-status"></div>
-        <div id="issue-assignee"></div>
-        <div class="transition-row">
-          <select id="transition-select" aria-label="변경할 상태 선택">
-            <option value="">상태 변경...</option>
-          </select>
-          <button id="btn-transition" disabled>변경</button>
-        </div>
-      </div>
     </section>
 
     <div id="status" class="status">초기화 중...</div>
