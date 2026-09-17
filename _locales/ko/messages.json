@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "Changelink for Gerrit and Jira Cloud",
+    "description": "스토어와 chrome://extensions 에 표시되는 확장 이름"
+  },
+  "extDesc": {
+    "message": "Gerrit change 페이지에서 바로 Jira 이슈를 조회하고 웹링크, 코멘트, 상태 전환까지 처리합니다.",
+    "description": "스토어에 표시되는 짧은 설명"
+  },
+  "actionTitle": {
+    "message": "Changelink",
+    "description": "툴바 버튼 툴팁"
+  }
+}

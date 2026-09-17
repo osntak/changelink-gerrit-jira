@@ -1,30 +1,38 @@
-# 개인정보처리방침 - Changelink
+# Privacy Policy - Changelink
 
-최종 수정: 2026-09-17
+[English](PRIVACY.md) · [한국어](PRIVACY.ko.md)
 
-이 확장은 Gerrit 과 Jira 를 연결하는 개발자용 도구입니다.
+Last updated: 2026-09-17
 
-## 수집하고 저장하는 것
+Changelink is a developer tool that connects Gerrit and Jira.
 
-- 사용자가 입력한 Gerrit 주소와 Jira 주소
-- Jira 계정 이메일
-- Jira API 토큰
-- 코멘트 템플릿, 빠른 실행 버튼 위치 같은 사용자 설정
+## What it stores
 
-모두 `chrome.storage.local` 에 저장합니다. 사용자의 브라우저 안에만 있고 확장 개발자를 포함해 누구에게도 전송하지 않습니다. `chrome.storage.sync` 는 쓰지 않으므로 다른 기기로 넘어가지도 않습니다.
+- The Gerrit URL and Jira URL you enter
+- Your Jira account email
+- Your Jira API token
+- Settings such as the comment template, language, and quick action button position
 
-## 사용 목적
+All of it lives in `chrome.storage.local`, inside your own browser. None of it is sent
+anywhere, including to the author of this extension. `chrome.storage.sync` is not used, so
+nothing is copied to your other devices either.
 
-저장한 이메일과 API 토큰은 사용자가 설정한 Jira 서버에 인증하는 데만 씁니다. 이슈 조회, 웹링크 등록, 코멘트 등록, 상태 전환 요청이 전부입니다.
+## What it is used for
 
-## 외부 전송
+The email and API token are used only to authenticate against the Jira site you configured.
+The requests made are issue lookups, remote links, comments, and status transitions.
 
-분석 도구, 광고, 개발자 서버로의 전송이 없습니다. 통신 상대는 사용자가 설정에 직접 입력한 Gerrit 주소와 Jira 주소 두 곳뿐이며, 그 외 사이트 접근 권한은 요청하지 않습니다.
+## What leaves your browser
 
-## 삭제
+There is no analytics, no advertising, and no server belonging to the author. The only
+hosts contacted are the Gerrit URL and the Jira URL you typed into the options page, and
+the extension holds no permission for any other site.
 
-설정 페이지에서 이메일과 토큰 입력란을 비우고 저장하면 저장된 인증 정보가 지워집니다. 확장을 제거하면 저장한 값도 함께 지워집니다.
+## Deleting your data
 
-## 문의
+Clear the email and token fields on the options page and save, and the stored credentials
+are removed. Uninstalling the extension deletes everything it stored.
+
+## Contact
 
 osntak@gmail.com

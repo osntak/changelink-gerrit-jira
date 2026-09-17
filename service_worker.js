@@ -4,7 +4,7 @@
 
 'use strict';
 
-importScripts('message_types.js');
+importScripts('i18n.js', 'message_types.js');
 
 const MSG = self.MESSAGE_TYPES;
 
@@ -24,7 +24,8 @@ function normalizeOrigin(value) {
 }
 
 async function loadSites() {
-  const stored = await chrome.storage.local.get(['gerritOrigin', 'jiraBase']);
+  const stored = await chrome.storage.local.get(['gerritOrigin', 'jiraBase', 'uiLanguage']);
+  I18N.setLang(stored.uiLanguage || 'auto');
   sites = {
     gerritOrigin: normalizeOrigin(stored.gerritOrigin),
     jiraBase: normalizeOrigin(stored.jiraBase),
@@ -95,7 +96,7 @@ async function registerGerritContentScript() {
     {
       id: 'gerrit',
       matches: [`${gerritOrigin}/*`],
-      js: ['message_types.js', 'content_script.js'],
+      js: ['i18n.js', 'message_types.js', 'content_script.js'],
       runAt: 'document_idle',
     },
   ]);
@@ -130,7 +131,7 @@ function injectContentScripts(tabId) {
     chrome.scripting.executeScript(
       {
         target: { tabId },
-        files: ['message_types.js', 'content_script.js'],
+        files: ['i18n.js', 'message_types.js', 'content_script.js'],
       },
       () => {
         if (chrome.runtime.lastError) {
@@ -195,20 +196,20 @@ function setFabEnabled(enabled) {
 
 async function getActiveGerritContext() {
   if (!sites.gerritOrigin) {
-    return { ok: false, message: '설정에서 Gerrit 주소를 먼저 입력하세요.' };
+    return { ok: false, message: I18N.t('sw.error.noGerritOrigin') };
   }
 
   const tab = await getActiveTab();
   if (!tab || !tab.id || !tab.url || !isGerritTab(tab.url)) {
     return {
       ok: false,
-      message: 'Gerrit change 페이지에서 팝업을 열어주세요.',
+      message: I18N.t('sw.error.notGerritTab'),
     };
   }
   if (!isAllowedChangeUrl(tab.url)) {
     return {
       ok: false,
-      message: 'Gerrit change 상세 페이지(/c/.../+/번호)에서 실행하세요.',
+      message: I18N.t('sw.error.notChangePage'),
     };
   }
 
@@ -228,14 +229,14 @@ async function getActiveGerritContext() {
     };
 
     if (!isAllowedChangeUrl(safeContext.gerritUrl)) {
-      return { ok: false, message: '허용된 Gerrit 도메인이 아닙니다.' };
+      return { ok: false, message: I18N.t('sw.error.notAllowedDomain') };
     }
 
     return { ok: true, tabId: tab.id, context: safeContext };
   } catch {
     return {
       ok: false,
-      message: '페이지 정보를 읽을 수 없습니다. 페이지를 새로고침 후 다시 시도하세요.',
+      message: I18N.t('sw.error.contextRead'),
     };
   }
 }
@@ -370,31 +371,31 @@ async function readJiraErrorDetail(resp) {
 
 function mapJiraError(status) {
   switch (status) {
-    case 400: return '잘못된 요청 (400): 이슈 키 또는 요청 형식을 확인하세요.';
-    case 401: return '인증 실패 (401): Jira 이메일 또는 API 토큰을 확인하세요.';
-    case 403: return '권한 없음 (403): 해당 작업 권한이 없습니다.';
-    case 404: return '대상을 찾을 수 없음 (404): 이슈 키를 확인하세요.';
-    default: return `Jira API 오류: HTTP ${status}`;
+    case 400: return I18N.t('sw.http.400');
+    case 401: return I18N.t('sw.http.401');
+    case 403: return I18N.t('sw.http.403');
+    case 404: return I18N.t('sw.http.404');
+    default: return I18N.t('sw.http.other', { status });
   }
 }
 
 function mapClientError(err, fallbackMessage) {
   if (!err) return fallbackMessage;
   if (err.code === 'missing_credentials') {
-    return 'Jira 이메일/토큰이 설정되지 않았습니다.\n옵션 페이지에서 설정하세요.';
+    return I18N.t('sw.error.missingCredentials');
   }
   if (err.code === 'invalid_issue_key') {
-    return 'PROJ-123 같은 이슈키가 필요합니다. 제목 또는 커밋 메시지에 jira: KEY를 추가하세요.';
+    return I18N.t('sw.error.noIssueKey');
   }
   if (err.code === 'invalid_gerrit_url') {
-    return '현재 페이지 URL이 허용된 Gerrit 도메인이 아닙니다.';
+    return I18N.t('sw.error.invalidGerritUrl');
   }
   if (typeof err.status === 'number') {
     const base = mapJiraError(err.status);
     return err.detail ? `${base}\n${err.detail}` : base;
   }
   if (err.code === 'network_error') {
-    return '네트워크 오류가 발생했습니다. 인터넷 연결을 확인하세요.';
+    return I18N.t('sw.error.network');
   }
   return fallbackMessage;
 }
@@ -664,7 +665,7 @@ async function handlePopupGetIssue(issueKey) {
   } catch (err) {
     return {
       ok: false,
-      message: mapClientError(err, '이슈 조회에 실패했습니다.'),
+      message: mapClientError(err, I18N.t('sw.error.lookupIssue')),
     };
   }
 }
@@ -677,7 +678,7 @@ async function handlePopupGetTransitions(issueKey) {
   } catch (err) {
     return {
       ok: false,
-      message: mapClientError(err, '상태 목록 조회에 실패했습니다.'),
+      message: mapClientError(err, I18N.t('sw.error.lookupTransitions')),
     };
   }
 }
@@ -685,7 +686,7 @@ async function handlePopupGetTransitions(issueKey) {
 async function handlePopupDoTransition(issueKey, transitionId) {
   const id = String(transitionId || '').trim();
   if (!id) {
-    return { ok: false, message: '변경할 상태를 선택하세요.' };
+    return { ok: false, message: I18N.t('sw.error.pickTransition') };
   }
 
   try {
@@ -695,7 +696,7 @@ async function handlePopupDoTransition(issueKey, transitionId) {
   } catch (err) {
     return {
       ok: false,
-      message: mapClientError(err, '상태 변경에 실패했습니다.'),
+      message: mapClientError(err, I18N.t('sw.error.transitionFailed')),
     };
   }
 }
@@ -713,13 +714,13 @@ async function handlePopupAddRemoteLink(issueKeyOverride) {
   if (!issueKey) {
     return {
       ok: false,
-      message: 'PROJ-123 같은 이슈키가 필요합니다. 제목 또는 커밋 메시지에 jira: KEY를 추가하세요.',
+      message: I18N.t('sw.error.noIssueKey'),
     };
   }
   if (!isAllowedChangeUrl(context.gerritUrl)) {
     return {
       ok: false,
-      message: '현재 페이지 URL이 허용된 Gerrit 도메인이 아닙니다.',
+      message: I18N.t('sw.error.invalidGerritUrl'),
     };
   }
 
@@ -729,7 +730,7 @@ async function handlePopupAddRemoteLink(issueKeyOverride) {
   } catch (err) {
     return {
       ok: false,
-      message: mapClientError(err, '웹링크 추가에 실패했습니다.'),
+      message: mapClientError(err, I18N.t('sw.error.remoteLinkFailed')),
     };
   }
 }
@@ -754,13 +755,13 @@ async function resolveCommentTarget(issueKeyOverride) {
   if (!issueKey) {
     return {
       ok: false,
-      message: 'PROJ-123 같은 이슈키가 필요합니다. 제목 또는 커밋 메시지에 jira: KEY를 추가하세요.',
+      message: I18N.t('sw.error.noIssueKey'),
     };
   }
   if (!isAllowedChangeUrl(context.gerritUrl)) {
     return {
       ok: false,
-      message: '현재 페이지 URL이 허용된 Gerrit 도메인이 아닙니다.',
+      message: I18N.t('sw.error.invalidGerritUrl'),
     };
   }
 
@@ -780,7 +781,7 @@ async function handlePopupPreviewComment(issueKeyOverride) {
   } catch (err) {
     return {
       ok: false,
-      message: mapClientError(err, '코멘트 미리보기 생성에 실패했습니다.'),
+      message: mapClientError(err, I18N.t('sw.error.previewFailed')),
     };
   }
 }
@@ -798,7 +799,7 @@ async function handlePopupCheckComment(issueKeyOverride) {
   } catch (err) {
     return {
       ok: false,
-      message: mapClientError(err, '코멘트 상태 확인에 실패했습니다.'),
+      message: mapClientError(err, I18N.t('sw.error.checkCommentFailed')),
     };
   }
 }
@@ -819,7 +820,7 @@ async function handlePopupAddComment(issueKeyOverride, force, commentText) {
           ok: false,
           duplicate: true,
           issueKey,
-          message: `${issueKey}에 이 change의 코멘트가 이미 있습니다.`,
+          message: I18N.t('sw.comment.duplicate', { issueKey }),
         };
       }
     }
@@ -830,7 +831,7 @@ async function handlePopupAddComment(issueKeyOverride, force, commentText) {
   } catch (err) {
     return {
       ok: false,
-      message: mapClientError(err, '코멘트 생성에 실패했습니다.'),
+      message: mapClientError(err, I18N.t('sw.error.commentFailed')),
     };
   }
 }
@@ -851,7 +852,7 @@ async function transitionByNameIfConfigured(issueKey) {
       return {
         attempted: true,
         ok: false,
-        note: `일치하는 상태 없음: ${applyTransitionName} (이미 해당 상태이거나 이름 확인 필요)`,
+        note: I18N.t('sw.transition.noMatch', { name: applyTransitionName }),
       };
     }
     await jiraClient.doTransition(issueKey, match.id);
@@ -860,7 +861,7 @@ async function transitionByNameIfConfigured(issueKey) {
     return {
       attempted: true,
       ok: false,
-      note: mapClientError(err, '상태 변경 실패'),
+      note: mapClientError(err, I18N.t('sw.transition.shortFail')),
     };
   }
 }
@@ -881,7 +882,7 @@ async function handlePopupQuickApply(issueKeyOverride, commentText, force) {
           ok: false,
           duplicate: true,
           issueKey,
-          message: `${issueKey}에 이 change의 코멘트가 이미 있습니다.`,
+          message: I18N.t('sw.comment.duplicate', { issueKey }),
         };
       }
     }
@@ -893,13 +894,13 @@ async function handlePopupQuickApply(issueKeyOverride, commentText, force) {
 
     const transition = await transitionByNameIfConfigured(issueKey);
 
-    let summary = `반영 처리 완료: ${issueKey} (웹링크+코멘트`;
+    let summary;
     if (transition.attempted && transition.ok) {
-      summary += `+상태변경: ${transition.note})`;
+      summary = I18N.t('sw.apply.doneWithTransition', { issueKey, status: transition.note });
     } else if (transition.attempted) {
-      summary += `) / 상태변경 실패: ${transition.note}`;
+      summary = I18N.t('sw.apply.doneTransitionFailed', { issueKey, note: transition.note });
     } else {
-      summary += ')';
+      summary = I18N.t('sw.apply.done', { issueKey });
     }
 
     return {
@@ -911,7 +912,7 @@ async function handlePopupQuickApply(issueKeyOverride, commentText, force) {
   } catch (err) {
     return {
       ok: false,
-      message: mapClientError(err, '반영 처리에 실패했습니다.'),
+      message: mapClientError(err, I18N.t('sw.error.applyFailed')),
     };
   }
 }
@@ -923,7 +924,7 @@ async function handlePopupSetFabEnabled(enabled) {
   if (!tab || !tab.id || !tab.url || !isGerritTab(tab.url)) {
     return {
       ok: true,
-      message: 'FAB 설정이 저장되었습니다. Gerrit 탭에서 반영됩니다.',
+      message: I18N.t('sw.fab.savedGerritTab'),
     };
   }
 
@@ -935,7 +936,7 @@ async function handlePopupSetFabEnabled(enabled) {
   } catch {
     return {
       ok: true,
-      message: 'FAB 설정이 저장되었습니다. 페이지 새로고침 시 반영됩니다.',
+      message: I18N.t('sw.fab.savedReload'),
     };
   }
 }
