@@ -1,4 +1,4 @@
-# 개인정보처리방침 - Gerrit Jira Tools
+# 개인정보처리방침 - Changelink
 
 최종 수정: 2026-09-17
 
@@ -27,4 +27,4 @@
 
 ## 문의
 
-TODO: 공개할 연락처 이메일을 여기에 적으세요.
+osntak@gmail.com
