@@ -32,7 +32,7 @@ change 하나 리뷰 끝내고 Jira 로 넘어가서 링크 붙이고 코멘트 
 
 ## 설치
 
-**Chrome 웹스토어:** [Changelink for Gerrit and Jira Cloud](https://chromewebstore.google.com/detail/jebbalmncnfhgcfgpkomacgmelhbfdcl) (심사 중. 통과하면 이 링크가 열림)
+**Chrome 웹스토어:** [Changelink for Gerrit and Jira Cloud](https://chromewebstore.google.com/detail/jebbalmncnfhgcfgpkomacgmelhbfdcl)
 
 **소스에서:**
 
