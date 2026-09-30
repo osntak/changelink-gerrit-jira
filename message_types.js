@@ -13,6 +13,7 @@
     POPUP_GET_ISSUE: 'POPUP_GET_ISSUE',
     POPUP_GET_TRANSITIONS: 'POPUP_GET_TRANSITIONS',
     GET_JIRA_STATUSES: 'GET_JIRA_STATUSES',
+    GET_JIRA_RESOLUTIONS: 'GET_JIRA_RESOLUTIONS',
     POPUP_DO_TRANSITION: 'POPUP_DO_TRANSITION',
     POPUP_ADD_REMOTE_LINK: 'POPUP_ADD_REMOTE_LINK',
     POPUP_ADD_COMMENT: 'POPUP_ADD_COMMENT',
@@ -36,7 +37,8 @@
       const key = [
         u.searchParams.get('selectedIssue'),
         (u.pathname.match(/\/(?:browse|issues)\/([^/]+)/) || [])[1],
-        u.pathname.split('/').pop(),
+        // Only service desk queues end in the key; other app pages may end in "page-1".
+        u.pathname.includes('/queues/') ? u.pathname.split('/').pop() : '',
       ].find((k) => k && /^[A-Z][A-Z0-9]+-\d+$/i.test(k));
       return key ? key.toUpperCase() : '';
     } catch {

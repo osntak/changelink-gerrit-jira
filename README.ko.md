@@ -47,7 +47,7 @@ npm run build          # changelink-v<버전>.zip 생성
 
 ## 설정
 
-확장 아이콘을 누르고 톱니 버튼으로 설정 페이지를 열어 네 칸을 채운다.
+확장 아이콘을 누르고 톱니 버튼으로 설정 페이지를 열어 아래 칸을 채운다.
 
 | 항목 | 예시 |
 | --- | --- |
@@ -55,10 +55,19 @@ npm run build          # changelink-v<버전>.zip 생성
 | Jira 주소 | `https://yourcompany.atlassian.net` |
 | Jira 이메일 | `dev@example.com` |
 | Jira API 토큰 | [여기서 발급](https://id.atlassian.com/manage-profile/security/api-tokens) |
+| Gerrit 사용자명, HTTP 비밀번호 (선택) | Gerrit 설정 → HTTP Credentials 에서 발급 |
 
 저장하면 두 사이트의 접근 권한을 묻는다. 방금 입력한 주소에 대한 호스트 권한을 요청하는
 것이고, 허용해야 동작한다. 연결 테스트는 `/rest/api/3/myself` 로 자격증명을 확인하고 HTTP
 상태를 그대로 보여준다. 토큰이 틀리면 나중에 조용히 실패하는 대신 401 이라고 말한다.
+
+Gerrit 사용자명과 HTTP 비밀번호는 Jira 이슈에서 관련 change 를 찾을 때만 쓴다. 비워 두면
+브라우저에 로그인된 Gerrit 세션으로 찾는다. 입력했다면 연결 테스트가 Gerrit 쪽도
+`/a/accounts/self` 로 같이 확인한다.
+
+반영 처리에서 이슈를 해결됨처럼 해결 값이 붙는 상태로 옮길 때, 설정의 "상태 전환 시 해결 값"으로
+Fixed 같은 값을 고를 수 있다. 처음에는 Jira 기본값(보통 Done)이 골라져 있다. 수정 버전처럼
+다른 필수 항목이 비어 있는 이슈는 상태를 바꾸지 않고 알려 준다.
 
 <p align="center">
   <img src="store-assets/screenshot-options-ko.png" width="760" alt="설정 페이지">
@@ -93,7 +102,7 @@ npm run build          # changelink-v<버전>.zip 생성
 | 권한 | 이유 |
 | --- | --- |
 | `storage` | 주소, 자격증명, 템플릿을 `chrome.storage.local` 에 보관 |
-| `scripting` | 설정한 Gerrit 호스트에 content script 를 등록하고, 확장 리로드 후 열려 있던 탭에 다시 주입 |
+| `scripting` | 설정한 Gerrit, Jira 호스트에 content script 를 등록하고, 확장 리로드 후 열려 있던 탭에 다시 주입 |
 | 선택적 호스트 권한 | 설정에 입력한 Gerrit/Jira 주소. 저장할 때 요청 |
 
 manifest 에는 호스트가 하나도 박혀 있지 않다. 이 확장이 건드릴 수 있는 사이트는 설정
@@ -113,8 +122,8 @@ Jira 로 가는 요청의 `Authorization` 헤더 외에 나가지 않으며, 토
 
 | 파일 | 역할 |
 | --- | --- |
-| `service_worker.js` | 모든 Jira API 호출. 네트워크 요청은 여기서만 |
-| `content_script.js` | Gerrit DOM 에서 change 컨텍스트 추출, 빠른 실행 버튼과 상태 배지 렌더 |
+| `service_worker.js` | 모든 Jira API 호출과 Gerrit change 검색. content script 가 열린 change 의 상세를 Gerrit 에서 읽는 것 말고는 네트워크 요청은 여기서만 |
+| `content_script.js` | Gerrit DOM 에서 change 컨텍스트 추출, 빠른 실행 버튼과 상태 배지 렌더. Jira 에서는 관련 Gerrit change 목록 버튼 |
 | `popup.js` | 툴바 팝업 |
 | `options.js` | 설정, 연결 테스트, 호스트 권한 요청 |
 | `i18n.js` | 네 곳이 공유하는 문자열 표와 언어 결정 |

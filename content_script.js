@@ -26,7 +26,6 @@ const DEFAULT_FAB_ACTIONS = {
 
 let fabSettingsCache = {
   fabActions: { ...DEFAULT_FAB_ACTIONS },
-  showStatusPill: true,
 };
 
 let networkContextCache = {
@@ -894,7 +893,11 @@ async function handleFabQuickApply() {
       showToast(resp?.message || I18N.t('sw.error.applyFailed'), 'error');
       return;
     }
-    showToast(resp.message || I18N.t('cs.toast.applyDone', { key: resp.issueKey || '' }).trim(), 'success', issueOpenAction(resp.issueKey));
+    showToast(
+      resp.message || I18N.t('cs.toast.applyDone', { key: resp.issueKey || '' }).trim(),
+      resp.transitionFailed ? 'warn' : 'success',
+      issueOpenAction(resp.issueKey),
+    );
   } catch {
     showToast(I18N.t('cs.toast.requestError'), 'error');
   }
@@ -991,18 +994,15 @@ const FAB_ACTION_DEFS = [
   { key: 'options', id: 'gj-fab-options', icon: '⚙️', titleKey: 'cs.fab.options', onClick: () => handleFabOpenOptions() },
 ];
 
-const JIRA_FAB_ACTION_DEFS = [
-  { key: 'gerritChanges', id: 'gj-fab-gerrit-changes', icon: '🔀', titleKey: 'gerrit.title', onClick: () => handleFabGerritChanges() },
-  { key: 'options', id: 'gj-fab-options', icon: '⚙️', titleKey: 'cs.fab.options', onClick: () => handleFabOpenOptions() },
-];
-
 // -- Jira page: Gerrit changes mentioning the issue ------------------------------
+// On Jira the FAB has no menu: clicking it opens this dialog directly.
 
 const CHANGES_DIALOG_ID = '__gj_changes_dialog__';
-const GERRIT_STATUS_COLORS = { NEW: '#1565c0', MERGED: '#2e7d32', ABANDONED: '#8a94a6' };
+const GERRIT_STATUS_COLORS = { NEW: '#1565c0', WIP: '#b26a00', MERGED: '#2e7d32', ABANDONED: '#8a94a6' };
+let closeChangesDialog = null;
 
 function showChangesDialog(title) {
-  document.getElementById(CHANGES_DIALOG_ID)?.remove();
+  if (closeChangesDialog) closeChangesDialog();
 
   const dialog = document.createElement('div');
   dialog.id = CHANGES_DIALOG_ID;
@@ -1020,28 +1020,49 @@ function showChangesDialog(title) {
     justifyContent: 'center',
   });
   dialog.innerHTML = `
-    <div style="width:min(560px, calc(100vw - 40px)); max-height:min(640px, calc(100vh - 40px)); display:flex; flex-direction:column; background:#fff; border-radius:10px; border:1px solid #d9e0ea; box-shadow:0 12px 28px rgba(0,0,0,0.28); overflow:hidden; font-family:system-ui,-apple-system,sans-serif;">
+    <div data-role="card" tabindex="-1" style="width:min(560px, calc(100vw - 40px)); max-height:min(640px, calc(100vh - 40px)); display:flex; flex-direction:column; background:#fff; border-radius:10px; border:1px solid #d9e0ea; box-shadow:0 12px 28px rgba(0,0,0,0.28); overflow:hidden; font-family:system-ui,-apple-system,sans-serif; outline:none;">
       <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:#f4f8ff; border-bottom:1px solid #d9e0ea;">
         <strong data-role="title" style="font-size:13px; color:#1e2530;"></strong>
-        <button data-role="close" type="button" style="border:1px solid #d9e0ea; background:#fff; border-radius:6px; width:28px; height:28px; cursor:pointer;">×</button>
+        <button data-role="close" type="button" style="border:1px solid #d9e0ea; background:#fff; color:#526074; font-size:16px; line-height:1; border-radius:6px; width:28px; height:28px; cursor:pointer;">×</button>
       </div>
       <div data-role="body" style="padding:6px 0; overflow:auto; font-size:12px; color:#2b3647; line-height:1.5;"></div>
     </div>
   `;
   dialog.querySelector('[data-role="title"]').textContent = title;
+  dialog.querySelector('[data-role="close"]').setAttribute('aria-label', I18N.t('cs.dialog.close'));
+
   const close = () => {
     dialog.remove();
-    document.removeEventListener('keydown', onKeydown, true);
+    window.removeEventListener('keydown', onKeydown, true);
+    closeChangesDialog = null;
+    document.getElementById('gj-fab-main')?.focus();
   };
   const onKeydown = (e) => {
-    if (e.key === 'Escape') close();
+    if (e.key !== 'Escape') return;
+    // Keep Escape from also closing the Jira issue modal underneath.
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    close();
   };
   dialog.addEventListener('click', (e) => {
     if (e.target === dialog || e.target.closest('[data-role="close"]')) close();
   });
-  document.addEventListener('keydown', onKeydown, true);
+  // Capture on window, the earliest point, so Jira's own Escape handlers never see it.
+  window.addEventListener('keydown', onKeydown, true);
   document.body.appendChild(dialog);
+  closeChangesDialog = close;
+  dialog.querySelector('[data-role="card"]').focus();
   return dialog.querySelector('[data-role="body"]');
+}
+
+function appendDialogLink(body, href, text) {
+  const link = document.createElement('a');
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = text;
+  Object.assign(link.style, { display: 'inline-block', margin: '8px 14px 10px', color: '#1565c0', fontWeight: '600' });
+  body.appendChild(link);
 }
 
 function setChangesDialogMessage(body, text) {
@@ -1052,7 +1073,7 @@ function setChangesDialogMessage(body, text) {
   body.appendChild(msg);
 }
 
-function renderChangesList(body, changes, more) {
+function renderChangesList(body, changes, more, searchUrl) {
   body.textContent = '';
   for (const c of changes) {
     const row = document.createElement('a');
@@ -1094,12 +1115,7 @@ function renderChangesList(body, changes, more) {
     row.append(head, meta);
     body.appendChild(row);
   }
-  if (more) {
-    const note = document.createElement('div');
-    note.textContent = I18N.t('gerrit.more', { n: changes.length });
-    Object.assign(note.style, { padding: '8px 14px', color: '#526074', fontSize: '11.5px' });
-    body.appendChild(note);
-  }
+  if (more && searchUrl) appendDialogLink(body, searchUrl, I18N.t('gerrit.viewAll'));
 }
 
 async function handleFabGerritChanges() {
@@ -1114,8 +1130,11 @@ async function handleFabGerritChanges() {
   try {
     const resp = await sendRuntimeMessage({ type: MSG.GET_GERRIT_CHANGES, issueKey: key });
     if (!resp?.ok) setChangesDialogMessage(body, resp?.message || I18N.t('cs.toast.requestError'));
-    else if (!resp.changes.length) setChangesDialogMessage(body, I18N.t('gerrit.empty', { key }));
-    else renderChangesList(body, resp.changes, resp.more);
+    else if (!resp.changes.length) {
+      setChangesDialogMessage(body, I18N.t(resp.signedIn ? 'gerrit.empty' : 'gerrit.notSignedIn'));
+      if (resp.loginUrl) appendDialogLink(body, resp.loginUrl, I18N.t('gerrit.signIn'));
+    }
+    else renderChangesList(body, resp.changes, resp.more, resp.searchUrl);
   } catch {
     setChangesDialogMessage(body, I18N.t('cs.toast.requestError'));
   }
@@ -1147,17 +1166,23 @@ function applyFabPosition(root, pos) {
 
 function restoreFabPosition(root) {
   try {
-    chrome.storage.local.get([FAB_POSITION_KEY], (data) => {
+    chrome.storage.local.get([fabPositionKey()], (data) => {
       if (chrome.runtime.lastError) return;
-      applyFabPosition(root, data[FAB_POSITION_KEY]);
+      applyFabPosition(root, data[fabPositionKey()]);
     });
   } catch { /* orphaned script — position just not restored */ }
 }
 
 function saveFabPosition(left, top) {
   try {
-    chrome.storage.local.set({ [FAB_POSITION_KEY]: { left, top } });
+    chrome.storage.local.set({ [fabPositionKey()]: { left, top } });
   } catch { /* orphaned script — position just not saved */ }
+}
+
+// Gerrit and Jira lay out their pages differently, so each keeps its own FAB spot.
+// Gerrit keeps the original key so an existing position survives the update.
+function fabPositionKey() {
+  return onJira ? `${FAB_POSITION_KEY}:jira` : FAB_POSITION_KEY;
 }
 
 function makeFabDraggable(root, mainButton) {
@@ -1282,7 +1307,7 @@ function renderFab() {
   });
 
   const enabledActions = fabSettingsCache.fabActions || DEFAULT_FAB_ACTIONS;
-  for (const def of onJira ? JIRA_FAB_ACTION_DEFS : FAB_ACTION_DEFS) {
+  for (const def of onJira ? [] : FAB_ACTION_DEFS) {
     if (enabledActions[def.key] === false) continue;
     menu.appendChild(buildFabActionButton(def));
   }
@@ -1313,7 +1338,8 @@ function renderFab() {
   mainButton.addEventListener('click', (e) => {
     e.stopPropagation();
     if (dragController.consumeSuppressedClick()) return;
-    if (isFabMenuOpen()) closeFabMenu();
+    if (onJira) handleFabGerritChanges();
+    else if (isFabMenuOpen()) closeFabMenu();
     else openFabMenu();
   });
 
@@ -1432,8 +1458,7 @@ async function refreshFabIssueState() {
   const issueKey = normalizeIssueKey(ctx.issueKey);
   setFabMainState(!!issueKey);
 
-  const pillEnabled = fabSettingsCache.showStatusPill !== false;
-  if (!issueKey || !pillEnabled || !isChangePage()) {
+  if (!issueKey || !isChangePage()) {
     removeStatusPill();
     return;
   }
@@ -1525,15 +1550,15 @@ function applyFabEnabled(enabled) {
 function initFabFromStorage() {
   try {
     chrome.storage.local.get(
-      ['fabEnabled', 'fabActions', 'showStatusPill', 'jiraBase'],
-      ({ fabEnabled, fabActions, showStatusPill, jiraBase: savedJiraBase }) => {
+      ['fabEnabled', 'fabEnabledJira', 'fabActions', 'jiraBase'],
+      ({ fabEnabled, fabEnabledJira, fabActions, jiraBase: savedJiraBase }) => {
         if (chrome.runtime.lastError) return;
         onJira = !!savedJiraBase && window.location.origin === savedJiraBase;
         fabSettingsCache = {
           fabActions: { ...DEFAULT_FAB_ACTIONS, ...(fabActions || {}) },
-          showStatusPill: showStatusPill !== false,
         };
-        applyFabEnabled(fabEnabled !== false);
+        // On/off is kept per site (popup toggle on that site's tab).
+        applyFabEnabled((onJira ? fabEnabledJira : fabEnabled) !== false);
       },
     );
   } catch {
@@ -1548,7 +1573,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.jiraBase) jiraBase = changes.jiraBase.newValue || '';
   // Language changes must redraw the FAB too: its labels are baked in at build time.
   if (changes.uiLanguage) I18N.setLang(changes.uiLanguage.newValue || 'auto');
-  if (!changes.uiLanguage && !changes.fabEnabled && !changes.fabActions && !changes.showStatusPill && !changes.jiraBase) return;
+  // Only this site's on/off key matters; the other site's switch must not rebuild this FAB.
+  const fabToggled = onJira ? changes.fabEnabledJira : changes.fabEnabled;
+  if (!changes.uiLanguage && !fabToggled && !changes.fabActions && !changes.jiraBase) return;
   removeFab();
   initFabFromStorage();
 });

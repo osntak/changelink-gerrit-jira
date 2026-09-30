@@ -11,6 +11,7 @@ Changelink is a developer tool that connects Gerrit and Jira.
 - The Gerrit URL and Jira URL you enter
 - Your Jira account email
 - Your Jira API token
+- (Optional) your Gerrit username and HTTP password
 - Settings such as the comment template, language, and quick action button position
 
 All of it lives in `chrome.storage.local`, inside your own browser. None of it is sent
@@ -23,8 +24,8 @@ The email and API token are used only to authenticate against the Jira site you 
 The requests made are issue lookups, remote links, comments, and status transitions.
 
 To find the Gerrit changes related to a Jira issue, the extension sends a search request to
-the Gerrit URL you configured, using the Gerrit session you are already signed in with in
-the browser. Gerrit credentials are never stored.
+the Gerrit URL you configured. If you saved a Gerrit HTTP password, it authenticates with
+that; otherwise it uses the Gerrit session you are already signed in with in the browser.
 
 ## What leaves your browser
 
@@ -34,8 +35,8 @@ the extension holds no permission for any other site.
 
 ## Deleting your data
 
-Clear the email and token fields on the options page and save, and the stored credentials
-are removed. Uninstalling the extension deletes everything it stored.
+Clear the credential fields on the options page (Jira email and token, Gerrit username and
+HTTP password) and save, and the stored values are removed. Uninstalling the extension deletes everything it stored.
 
 ## Contact
 
