@@ -32,6 +32,10 @@ directly from the extension. There is no server in between, and no account to si
 - Puts a draggable quick action button on the change page, with the buttons you pick
 - On a Jira issue, lists the Gerrit changes whose commit message mentions it, from the popup or the quick action button
 
+<p align="center">
+  <img src="store-assets/screenshot-jira-browser.png" width="820" alt="Related Gerrit changes in the popup on a Jira issue page">
+</p>
+
 ## Install
 
 **From the Chrome Web Store:** [Changelink for Gerrit and Jira Cloud](https://chromewebstore.google.com/detail/jebbalmncnfhgcfgpkomacgmelhbfdcl)

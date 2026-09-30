@@ -31,6 +31,10 @@ change 하나 리뷰 끝내고 Jira 로 넘어가서 링크 붙이고 코멘트 
 - change 페이지에 끌어서 옮길 수 있는 빠른 실행 버튼. 버튼 구성은 설정에서 고름
 - Jira 이슈 페이지에서는 커밋 메시지에 그 이슈키가 들어간 Gerrit change 목록을 팝업이나 빠른 실행 버튼으로 보여줌
 
+<p align="center">
+  <img src="store-assets/screenshot-jira-browser-ko.png" width="820" alt="Jira 이슈 페이지에서 연 팝업의 관련 Gerrit change 목록">
+</p>
+
 ## 설치
 
 **Chrome 웹스토어:** [Changelink for Gerrit and Jira Cloud](https://chromewebstore.google.com/detail/jebbalmncnfhgcfgpkomacgmelhbfdcl)
