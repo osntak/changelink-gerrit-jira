@@ -2,7 +2,7 @@
 
 [English](PRIVACY.md) · [한국어](PRIVACY.ko.md)
 
-최종 수정: 2026-09-17
+최종 수정: 2026-09-30
 
 Changelink 는 Gerrit 과 Jira 를 연결하는 개발자용 도구입니다.
 
@@ -21,6 +21,9 @@ Changelink 는 Gerrit 과 Jira 를 연결하는 개발자용 도구입니다.
 
 저장한 이메일과 API 토큰은 사용자가 설정한 Jira 서버에 인증하는 데만 씁니다. 이슈 조회,
 웹링크 등록, 코멘트 등록, 상태 전환 요청이 전부입니다.
+
+Jira 이슈 페이지에서 관련 Gerrit change 를 찾을 때는 브라우저에 이미 로그인되어 있는 Gerrit
+세션으로 설정한 Gerrit 주소에 검색 요청을 보냅니다. Gerrit 로그인 정보는 저장하지 않습니다.
 
 ## 외부 전송
 

@@ -219,7 +219,7 @@
   'sw.apply.done': { ko: '반영 처리 완료: {issueKey} (웹링크+코멘트)', en: 'Applied to {issueKey} (web link + comment)' },
   'sw.apply.doneWithTransition': { ko: '반영 처리 완료: {issueKey} (웹링크+코멘트+상태변경: {status})', en: 'Applied to {issueKey} (web link + comment + status: {status})' },
   'sw.apply.doneTransitionFailed': { ko: '반영 처리 완료: {issueKey} (웹링크+코멘트) / 상태변경 실패: {note}', en: 'Applied to {issueKey} (web link + comment) / status change failed: {note}' },
-  'sw.fab.savedGerritTab': { ko: 'FAB 설정이 저장되었습니다. Gerrit 탭에서 반영됩니다.', en: 'FAB setting saved. It takes effect on Gerrit tabs.' },
+  'sw.fab.savedGerritTab': { ko: 'FAB 설정이 저장되었습니다. Gerrit·Jira 탭에서 반영됩니다.', en: 'FAB setting saved. It takes effect on Gerrit and Jira tabs.' },
   'sw.fab.savedReload': { ko: 'FAB 설정이 저장되었습니다. 페이지 새로고침 시 반영됩니다.', en: 'FAB setting saved. It takes effect after a page reload.' },
 
   // content script
@@ -250,6 +250,15 @@
   'cs.fab.mainTitle': { ko: 'Jira 빠른 액션', en: 'Jira quick actions' },
   'cs.fab.mainTitleNoKey': { ko: 'Jira 이슈키 미감지 (커밋 메시지에 jira: KEY 필요)', en: 'No Jira issue key detected (add jira: KEY to the commit message)' },
   'cs.pill.title': { ko: 'Jira 이슈 열기', en: 'Open Jira issue' },
+
+  // Gerrit changes on a Jira issue (popup + Jira FAB)
+  'gerrit.title': { ko: '관련 Gerrit change', en: 'Related Gerrit changes' },
+  'popup.status.gerritDone': { ko: 'Gerrit 조회 완료: {n}건', en: 'Gerrit lookup done: {n} found' },
+  'gerrit.loading': { ko: 'Gerrit 검색 중...', en: 'Searching Gerrit...' },
+  'gerrit.empty': { ko: '커밋 메시지에 {key}가 들어간 change가 없습니다.\nGerrit에 로그인하지 않았다면 공개된 change만 검색됩니다.', en: 'No change mentions {key} in its commit message.\nIf you are not signed in to Gerrit, only public changes are searched.' },
+  'gerrit.more': { ko: '최근 {n}개만 표시합니다.', en: 'Showing the latest {n} only.' },
+  'sw.gerrit.unreachable': { ko: 'Gerrit에 연결할 수 없습니다. Gerrit에 로그인되어 있는지 확인하세요.', en: 'Could not reach Gerrit. Check that you are signed in to Gerrit.' },
+  'sw.gerrit.searchFailed': { ko: 'Gerrit 검색에 실패했습니다 (HTTP {status}). Gerrit에 로그인되어 있는지 확인하세요.', en: 'Gerrit search failed (HTTP {status}). Check that you are signed in to Gerrit.' },
 
   // options
   'options.pageTitle': { ko: 'Changelink - 설정', en: 'Changelink - Settings' },

@@ -22,6 +22,11 @@ const previewDupEl = document.getElementById('preview-dup');
 const previewTextEl = document.getElementById('preview-text');
 const btnPreviewSubmit = document.getElementById('btn-preview-submit');
 const btnPreviewCancel = document.getElementById('btn-preview-cancel');
+const gerritListEl = document.getElementById('gerrit-list');
+
+// Opened on a Jira issue page: show only the Gerrit changes that mention the
+// issue (body.jira-mode hides the Gerrit-change UI).
+let jiraMode = false;
 
 let currentContext = null;
 let authConfigured = true;
@@ -546,7 +551,87 @@ function openIssuePage() {
   window.close();
 }
 
+// -- Jira mode: Gerrit changes mentioning the issue --------------------------------
+
+async function getJiraTabIssueKey() {
+  const [{ jiraBase: base }, [tab]] = await Promise.all([
+    chrome.storage.local.get(['jiraBase']),
+    chrome.tabs.query({ active: true, currentWindow: true }),
+  ]);
+  if (!base || !tab?.url) return '';
+  try {
+    if (new URL(tab.url).origin !== base) return '';
+  } catch {
+    return '';
+  }
+  return self.jiraIssueKeyFromUrl(tab.url);
+}
+
+function appendGerritNote(text) {
+  const note = document.createElement('div');
+  note.className = 'change-empty';
+  note.textContent = text;
+  gerritListEl.appendChild(note);
+}
+
+async function loadGerritChanges() {
+  const key = getEffectiveIssueKey();
+  gerritListEl.textContent = '';
+  btnRefresh.disabled = true;
+  setStatus(I18N.t('gerrit.loading'), '');
+  try {
+    const resp = await sendMessage({ type: MSG.GET_GERRIT_CHANGES, issueKey: key });
+    if (!resp?.ok) {
+      setStatus(resp?.message || I18N.t('popup.status.requestError'), 'err');
+      return;
+    }
+    setStatus(I18N.t('popup.status.gerritDone', { n: resp.changes.length }), 'ok');
+    if (!resp.changes.length) {
+      appendGerritNote(I18N.t('gerrit.empty', { key }));
+      return;
+    }
+    for (const c of resp.changes) {
+      const item = document.createElement('a');
+      item.className = 'change-item';
+      item.href = c.url;
+      item.target = '_blank';
+      item.rel = 'noopener noreferrer';
+
+      const head = document.createElement('div');
+      head.className = 'subject';
+      const status = document.createElement('span');
+      status.className = `change-status ${c.status}`;
+      status.textContent = c.status;
+      head.append(status, `${c.number} · ${c.subject}`);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = [`${c.project} / ${c.branch}`, c.owner, c.date].filter(Boolean).join(' · ');
+
+      item.append(head, meta);
+      gerritListEl.appendChild(item);
+    }
+    if (resp.more) appendGerritNote(I18N.t('gerrit.more', { n: resp.changes.length }));
+  } catch {
+    setStatus(I18N.t('popup.status.requestError'), 'err');
+  } finally {
+    btnRefresh.disabled = false;
+  }
+}
+
+async function initJiraMode(issueKey) {
+  jiraMode = true;
+  document.body.classList.add('jira-mode');
+  issueKeyInputEl.value = issueKey;
+  document.getElementById('head-key').textContent = ` · ${issueKey}`;
+  await loadGerritChanges();
+}
+
 btnRefresh.addEventListener('click', async () => {
+  if (jiraMode) {
+    await loadGerritChanges();
+    return;
+  }
   setActionBusy(true);
   const ready = await loadContext();
   if (ready && authConfigured) {
@@ -602,6 +687,11 @@ I18N.init(async () => {
   syncActionButtons();
   await loadAuthState();
   await loadFabSetting();
+  const jiraKey = await getJiraTabIssueKey();
+  if (jiraKey) {
+    await initJiraMode(jiraKey);
+    return;
+  }
   const ready = await loadContext();
   if (ready && authConfigured && isGerritChangeUrl(currentContext?.gerritUrl || '') && getEffectiveIssueKey()) {
     await fetchIssue();

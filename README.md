@@ -30,6 +30,7 @@ directly from the extension. There is no server in between, and no account to si
 - Moves the issue to another status
 - Does all of the above in one click, skipping the comment if the same one is already there
 - Puts a draggable quick action button on the change page, with the buttons you pick
+- On a Jira issue, lists the Gerrit changes whose commit message mentions it, from the popup or the quick action button
 
 ## Install
 

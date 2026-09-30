@@ -1,6 +1,10 @@
 // content_script.js
 // Responsibilities: extract Gerrit context from DOM, display toast notifications,
-// and provide FAB quick actions. No direct network requests.
+// and provide FAB quick actions. No direct network requests except same-origin
+// Gerrit detail reads.
+//
+// Also runs on the Jira site. There the FAB only lists the Gerrit changes that
+// mention the open issue (onJira mode); none of the Gerrit extraction runs.
 
 'use strict';
 
@@ -8,7 +12,7 @@ const MSG = self.MESSAGE_TYPES;
 const FAB_ROOT_ID = 'gj-fab-root';
 const ISSUE_DIALOG_ID = '__gj_issue_dialog__';
 const STATUS_PILL_ID = 'gj-fab-status-pill';
-const FAB_SCHEMA_VERSION = '5';
+const FAB_SCHEMA_VERSION = '6';
 const FAB_POSITION_KEY = 'fabPosition';
 
 const DEFAULT_FAB_ACTIONS = {
@@ -40,6 +44,8 @@ let networkContextCache = {
 // Jira site URL is user-configured in options.
 let jiraBase = '';
 chrome.storage.local.get(['jiraBase'], ({ jiraBase: saved }) => { jiraBase = saved || ''; });
+// Set once storage is read (initFabFromStorage). Jira pages get the Jira FAB.
+let onJira = false;
 
 function openIssueInJira(key) {
   if (!jiraBase) return;
@@ -985,6 +991,136 @@ const FAB_ACTION_DEFS = [
   { key: 'options', id: 'gj-fab-options', icon: '⚙️', titleKey: 'cs.fab.options', onClick: () => handleFabOpenOptions() },
 ];
 
+const JIRA_FAB_ACTION_DEFS = [
+  { key: 'gerritChanges', id: 'gj-fab-gerrit-changes', icon: '🔀', titleKey: 'gerrit.title', onClick: () => handleFabGerritChanges() },
+  { key: 'options', id: 'gj-fab-options', icon: '⚙️', titleKey: 'cs.fab.options', onClick: () => handleFabOpenOptions() },
+];
+
+// -- Jira page: Gerrit changes mentioning the issue ------------------------------
+
+const CHANGES_DIALOG_ID = '__gj_changes_dialog__';
+const GERRIT_STATUS_COLORS = { NEW: '#1565c0', MERGED: '#2e7d32', ABANDONED: '#8a94a6' };
+
+function showChangesDialog(title) {
+  document.getElementById(CHANGES_DIALOG_ID)?.remove();
+
+  const dialog = document.createElement('div');
+  dialog.id = CHANGES_DIALOG_ID;
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-label', title);
+  Object.assign(dialog.style, {
+    position: 'fixed',
+    inset: '0',
+    background: 'rgba(0,0,0,0.35)',
+    // Above the FAB, which would otherwise float over the overlay.
+    zIndex: '2147483647',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  });
+  dialog.innerHTML = `
+    <div style="width:min(560px, calc(100vw - 40px)); max-height:min(640px, calc(100vh - 40px)); display:flex; flex-direction:column; background:#fff; border-radius:10px; border:1px solid #d9e0ea; box-shadow:0 12px 28px rgba(0,0,0,0.28); overflow:hidden; font-family:system-ui,-apple-system,sans-serif;">
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:#f4f8ff; border-bottom:1px solid #d9e0ea;">
+        <strong data-role="title" style="font-size:13px; color:#1e2530;"></strong>
+        <button data-role="close" type="button" style="border:1px solid #d9e0ea; background:#fff; border-radius:6px; width:28px; height:28px; cursor:pointer;">×</button>
+      </div>
+      <div data-role="body" style="padding:6px 0; overflow:auto; font-size:12px; color:#2b3647; line-height:1.5;"></div>
+    </div>
+  `;
+  dialog.querySelector('[data-role="title"]').textContent = title;
+  const close = () => {
+    dialog.remove();
+    document.removeEventListener('keydown', onKeydown, true);
+  };
+  const onKeydown = (e) => {
+    if (e.key === 'Escape') close();
+  };
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog || e.target.closest('[data-role="close"]')) close();
+  });
+  document.addEventListener('keydown', onKeydown, true);
+  document.body.appendChild(dialog);
+  return dialog.querySelector('[data-role="body"]');
+}
+
+function setChangesDialogMessage(body, text) {
+  body.textContent = '';
+  const msg = document.createElement('div');
+  msg.textContent = text;
+  Object.assign(msg.style, { padding: '10px 14px', whiteSpace: 'pre-line' });
+  body.appendChild(msg);
+}
+
+function renderChangesList(body, changes, more) {
+  body.textContent = '';
+  for (const c of changes) {
+    const row = document.createElement('a');
+    row.href = c.url;
+    row.target = '_blank';
+    row.rel = 'noopener noreferrer';
+    Object.assign(row.style, {
+      display: 'block',
+      padding: '8px 14px',
+      borderBottom: '1px solid #eef1f6',
+      color: 'inherit',
+      textDecoration: 'none',
+    });
+    row.addEventListener('mouseenter', () => { row.style.background = '#f4f8ff'; });
+    row.addEventListener('mouseleave', () => { row.style.background = ''; });
+
+    const head = document.createElement('div');
+    const status = document.createElement('span');
+    status.textContent = c.status;
+    Object.assign(status.style, {
+      display: 'inline-block',
+      marginRight: '6px',
+      padding: '0 6px',
+      borderRadius: '4px',
+      fontSize: '10.5px',
+      fontWeight: '700',
+      color: '#fff',
+      background: GERRIT_STATUS_COLORS[c.status] || '#8a94a6',
+    });
+    const subject = document.createElement('span');
+    subject.textContent = `${c.number} · ${c.subject}`;
+    subject.style.fontWeight = '600';
+    head.append(status, subject);
+
+    const meta = document.createElement('div');
+    meta.textContent = [`${c.project} / ${c.branch}`, c.owner, c.date].filter(Boolean).join(' · ');
+    Object.assign(meta.style, { color: '#526074', fontSize: '11.5px', marginTop: '2px' });
+
+    row.append(head, meta);
+    body.appendChild(row);
+  }
+  if (more) {
+    const note = document.createElement('div');
+    note.textContent = I18N.t('gerrit.more', { n: changes.length });
+    Object.assign(note.style, { padding: '8px 14px', color: '#526074', fontSize: '11.5px' });
+    body.appendChild(note);
+  }
+}
+
+async function handleFabGerritChanges() {
+  const key = self.jiraIssueKeyFromUrl(window.location.href);
+  if (!key) {
+    showToast(I18N.t('cs.toast.noIssueKeyFound'), 'warn');
+    return;
+  }
+
+  const body = showChangesDialog(`${I18N.t('gerrit.title')} · ${key}`);
+  setChangesDialogMessage(body, I18N.t('gerrit.loading'));
+  try {
+    const resp = await sendRuntimeMessage({ type: MSG.GET_GERRIT_CHANGES, issueKey: key });
+    if (!resp?.ok) setChangesDialogMessage(body, resp?.message || I18N.t('cs.toast.requestError'));
+    else if (!resp.changes.length) setChangesDialogMessage(body, I18N.t('gerrit.empty', { key }));
+    else renderChangesList(body, resp.changes, resp.more);
+  } catch {
+    setChangesDialogMessage(body, I18N.t('cs.toast.requestError'));
+  }
+}
+
 // -- FAB position (drag & persist) ---------------------------------------------
 
 let fabResizeHandler = null;
@@ -1146,7 +1282,7 @@ function renderFab() {
   });
 
   const enabledActions = fabSettingsCache.fabActions || DEFAULT_FAB_ACTIONS;
-  for (const def of FAB_ACTION_DEFS) {
+  for (const def of onJira ? JIRA_FAB_ACTION_DEFS : FAB_ACTION_DEFS) {
     if (enabledActions[def.key] === false) continue;
     menu.appendChild(buildFabActionButton(def));
   }
@@ -1154,8 +1290,9 @@ function renderFab() {
   const mainButton = document.createElement('button');
   mainButton.id = 'gj-fab-main';
   mainButton.type = 'button';
-  mainButton.setAttribute('aria-label', 'Toggle Jira quick actions');
-  mainButton.textContent = 'Jira';
+  mainButton.setAttribute('aria-label', 'Changelink');
+  // Same chain-link glyph as the toolbar icon (icons/icon-small.svg).
+  mainButton.innerHTML = '<svg viewBox="0 0 512 512" width="30" height="30" aria-hidden="true" style="display:block;margin:auto"><rect x="75" y="186" width="182" height="140" rx="70" fill="none" stroke="currentColor" stroke-width="56"/><rect x="255" y="186" width="182" height="140" rx="70" fill="none" stroke="currentColor" stroke-width="56"/></svg>';
 
   Object.assign(mainButton.style, {
     width: '56px',
@@ -1210,7 +1347,8 @@ function setFabMainState(detected) {
   const main = document.getElementById('gj-fab-main');
   if (!main) return;
   main.style.background = detected ? '#1565c0' : '#8a94a6';
-  main.title = I18N.t(detected ? 'cs.fab.mainTitle' : 'cs.fab.mainTitleNoKey');
+  if (onJira) main.title = I18N.t('gerrit.title');
+  else main.title = I18N.t(detected ? 'cs.fab.mainTitle' : 'cs.fab.mainTitleNoKey');
 }
 
 function ensureStatusPill(root, issueKey) {
@@ -1283,6 +1421,13 @@ async function refreshFabIssueState() {
   const root = document.getElementById(FAB_ROOT_ID);
   if (!root) return;
 
+  if (onJira) {
+    // Only issue pages have anything to show; hide on boards, filters, etc.
+    root.style.display = self.jiraIssueKeyFromUrl(window.location.href) ? 'grid' : 'none';
+    setFabMainState(true);
+    return;
+  }
+
   const ctx = extractContext();
   const issueKey = normalizeIssueKey(ctx.issueKey);
   setFabMainState(!!issueKey);
@@ -1348,6 +1493,10 @@ const urlWatchTimer = setInterval(() => {
   if (window.location.href === lastWatchedHref) return;
   const prevChange = lastWatchedHref.match(/\/\+\/(\d+)/)?.[1] || '';
   lastWatchedHref = window.location.href;
+  if (onJira) {
+    refreshFabIssueState();
+    return;
+  }
   const nextChange = extractChangeNum();
   if (prevChange !== nextChange) handleLocationChange();
 }, 1500);
@@ -1376,9 +1525,10 @@ function applyFabEnabled(enabled) {
 function initFabFromStorage() {
   try {
     chrome.storage.local.get(
-      ['fabEnabled', 'fabActions', 'showStatusPill'],
-      ({ fabEnabled, fabActions, showStatusPill }) => {
+      ['fabEnabled', 'fabActions', 'showStatusPill', 'jiraBase'],
+      ({ fabEnabled, fabActions, showStatusPill, jiraBase: savedJiraBase }) => {
         if (chrome.runtime.lastError) return;
+        onJira = !!savedJiraBase && window.location.origin === savedJiraBase;
         fabSettingsCache = {
           fabActions: { ...DEFAULT_FAB_ACTIONS, ...(fabActions || {}) },
           showStatusPill: showStatusPill !== false,
@@ -1398,7 +1548,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.jiraBase) jiraBase = changes.jiraBase.newValue || '';
   // Language changes must redraw the FAB too: its labels are baked in at build time.
   if (changes.uiLanguage) I18N.setLang(changes.uiLanguage.newValue || 'auto');
-  if (!changes.uiLanguage && !changes.fabEnabled && !changes.fabActions && !changes.showStatusPill) return;
+  if (!changes.uiLanguage && !changes.fabEnabled && !changes.fabActions && !changes.showStatusPill && !changes.jiraBase) return;
   removeFab();
   initFabFromStorage();
 });
