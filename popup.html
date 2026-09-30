@@ -296,6 +296,25 @@
       white-space: pre-line;
     }
 
+    /* Opened on a Jira issue: only the header, the Gerrit change list and the FAB toggle. */
+    .change-list { display: none; }
+    body.jira-mode { width: 520px; }
+    .head-key { color: var(--sub); font-weight: 600; }
+    body.jira-mode .issue-title,
+    body.jira-mode .info-grid,
+    body.jira-mode .comment-state,
+    body.jira-mode .btn-row,
+    body.jira-mode .preview-panel { display: none; }
+    body.jira-mode .change-list { margin-top: 8px; display: grid; gap: 2px; max-height: 420px; overflow: auto; }
+    .change-item { display: block; padding: 6px 8px; border-radius: 7px; color: var(--ink); text-decoration: none; }
+    .change-item:hover { background: #f4f8ff; }
+    .change-item .subject { font-weight: 600; word-break: break-word; }
+    .change-item .meta { color: var(--sub); font-size: 11.5px; }
+    .change-status { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 4px; font-size: 10.5px; font-weight: 700; color: #fff; background: #8a94a6; }
+    .change-status.NEW { background: var(--pri); }
+    .change-status.MERGED { background: var(--ok); }
+    .change-empty { margin-top: 8px; color: var(--sub); font-size: 12px; white-space: pre-line; }
+
     .status.ok { background: #e8f5e9; color: var(--ok); }
     .status.err { background: #ffebee; color: var(--err); }
     .status.warn { background: #fff3e0; color: var(--warn); }
@@ -305,7 +324,7 @@
   <div class="wrap">
     <section class="panel">
       <div class="head-row">
-        <h1>Changelink</h1>
+        <h1>Changelink<span id="head-key" class="head-key"></span></h1>
         <div class="head-actions">
           <button id="btn-refresh" class="icon-btn" data-i18n-title="popup.btn.refresh" data-i18n-label="popup.btn.refresh">↻</button>
           <button id="btn-options" class="icon-btn" data-i18n-title="popup.btn.options" data-i18n-label="popup.btn.options">⚙</button>
@@ -334,6 +353,7 @@
         <div id="issue-assignee" class="value">-</div>
       </div>
       <div id="issue-comment-state" class="comment-state"></div>
+      <div id="gerrit-list" class="change-list"></div>
 
       <div id="btn-row" class="btn-row">
         <button id="btn-apply" class="span2" data-i18n="popup.btn.apply">⚡ 반영 처리</button>

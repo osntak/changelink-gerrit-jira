@@ -2,7 +2,7 @@
 
 [English](PRIVACY.md) · [한국어](PRIVACY.ko.md)
 
-Last updated: 2026-09-17
+Last updated: 2026-09-30
 
 Changelink is a developer tool that connects Gerrit and Jira.
 
@@ -21,6 +21,10 @@ nothing is copied to your other devices either.
 
 The email and API token are used only to authenticate against the Jira site you configured.
 The requests made are issue lookups, remote links, comments, and status transitions.
+
+To find the Gerrit changes related to a Jira issue, the extension sends a search request to
+the Gerrit URL you configured, using the Gerrit session you are already signed in with in
+the browser. Gerrit credentials are never stored.
 
 ## What leaves your browser
 

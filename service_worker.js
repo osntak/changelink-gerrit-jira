@@ -76,35 +76,45 @@ function assertJiraConfigured() {
   }
 }
 
-// Content script is registered dynamically: the Gerrit host is only known after
-// the user saves it in options and grants the host permission.
-async function registerGerritContentScript() {
-  const { gerritOrigin } = await loadSites();
+function isJiraTab(url) {
+  try {
+    return !!sites.jiraBase && new URL(url).origin === sites.jiraBase;
+  } catch {
+    return false;
+  }
+}
+
+// Content scripts are registered dynamically: the Gerrit and Jira hosts are only
+// known after the user saves them in options and grants the host permissions.
+// The same script runs on both; it picks its mode from the page origin.
+async function registerSiteContentScripts() {
+  const { gerritOrigin, jiraBase } = await loadSites();
 
   try {
-    await chrome.scripting.unregisterContentScripts({ ids: ['gerrit'] });
+    await chrome.scripting.unregisterContentScripts();
   } catch {
     // Nothing registered yet.
   }
 
-  if (!gerritOrigin) return false;
-
-  const granted = await chrome.permissions.contains({ origins: [`${gerritOrigin}/*`] });
-  if (!granted) return false;
-
-  await chrome.scripting.registerContentScripts([
-    {
-      id: 'gerrit',
-      matches: [`${gerritOrigin}/*`],
+  const scripts = [];
+  for (const [id, origin] of [['gerrit', gerritOrigin], ['jira', jiraBase]]) {
+    if (!origin || (id === 'jira' && origin === gerritOrigin)) continue;
+    if (!(await chrome.permissions.contains({ origins: [`${origin}/*`] }))) continue;
+    scripts.push({
+      id,
+      matches: [`${origin}/*`],
+      // Confluence shares the Jira Cloud origin.
+      ...(id === 'jira' ? { excludeMatches: [`${origin}/wiki/*`] } : {}),
       js: ['i18n.js', 'message_types.js', 'content_script.js'],
       runAt: 'document_idle',
-    },
-  ]);
-  return true;
+    });
+  }
+  if (scripts.length) await chrome.scripting.registerContentScripts(scripts);
+  return scripts.some((s) => s.id === 'gerrit');
 }
 
-chrome.runtime.onInstalled.addListener(() => { registerGerritContentScript(); });
-chrome.runtime.onStartup.addListener(() => { registerGerritContentScript(); });
+chrome.runtime.onInstalled.addListener(() => { registerSiteContentScripts(); });
+chrome.runtime.onStartup.addListener(() => { registerSiteContentScripts(); });
 
 function sendToTab(tabId, message) {
   return new Promise((resolve, reject) => {
@@ -921,7 +931,7 @@ async function handlePopupSetFabEnabled(enabled) {
   await setFabEnabled(enabled);
 
   const tab = await getActiveTab();
-  if (!tab || !tab.id || !tab.url || !isGerritTab(tab.url)) {
+  if (!tab || !tab.id || !tab.url || !(isGerritTab(tab.url) || isJiraTab(tab.url))) {
     return {
       ok: true,
       message: I18N.t('sw.fab.savedGerritTab'),
@@ -941,9 +951,57 @@ async function handlePopupSetFabEnabled(enabled) {
   }
 }
 
+// Changes whose commit message mentions the issue key. Uses the browser's Gerrit
+// login cookie, so it sees what the user sees in the Gerrit UI.
+async function handleGetGerritChanges(issueKey) {
+  const key = String(issueKey || '').trim().toUpperCase();
+  if (!isValidIssueKey(key)) return { ok: false, message: I18N.t('sw.error.noIssueKey') };
+  if (!sites.gerritOrigin) return { ok: false, message: I18N.t('sw.error.noGerritOrigin') };
+
+  const limit = 50;
+  const query = encodeURIComponent(`message:"${key}"`);
+  let resp;
+  try {
+    resp = await fetch(
+      `${sites.gerritOrigin}/changes/?q=${query}&n=${limit}&o=DETAILED_ACCOUNTS`,
+      { credentials: 'include', headers: { Accept: 'application/json' } },
+    );
+  } catch {
+    // Also lands here when an SSO login redirect leaves the Gerrit origin.
+    return { ok: false, message: I18N.t('sw.gerrit.unreachable') };
+  }
+  if (!resp.ok || new URL(resp.url).origin !== sites.gerritOrigin) {
+    return { ok: false, message: I18N.t('sw.gerrit.searchFailed', { status: resp.status }) };
+  }
+
+  let list;
+  try {
+    // Gerrit prefixes JSON with )]}' to block XSSI.
+    list = JSON.parse((await resp.text()).replace(/^\)\]\}'\s*/, ''));
+  } catch {
+    return { ok: false, message: I18N.t('sw.gerrit.searchFailed', { status: resp.status }) };
+  }
+  if (!Array.isArray(list)) list = [];
+
+  return {
+    ok: true,
+    more: !!list[list.length - 1]?._more_changes,
+    changes: list.map((c) => ({
+      number: c._number,
+      subject: String(c.subject || ''),
+      status: String(c.status || ''),
+      project: String(c.project || ''),
+      branch: String(c.branch || ''),
+      owner: String(c.owner?.name || c.owner?.username || ''),
+      date: formatDateMaybe(c.submitted || c.updated).slice(0, 10),
+      url: `${sites.gerritOrigin}/c/${encodeURIComponent(c.project).replace(/%2F/g, '/')}/+/${c._number}`,
+    })),
+  };
+}
+
 function dispatchMessage(msg, sendResponse) {
   if (msg.type === MSG.SET_SITES) {
-    registerGerritContentScript()
+    registerSiteContentScripts()
       .then((registered) => sendResponse({ ok: true, registered }))
       .catch((err) => sendResponse({ ok: false, message: String(err?.message || err) }));
     return;
@@ -1015,6 +1073,11 @@ function dispatchMessage(msg, sendResponse) {
     chrome.runtime.openOptionsPage();
     sendResponse({ ok: true });
     return false;
+  }
+
+  if (msg.type === MSG.GET_GERRIT_CHANGES) {
+    handleGetGerritChanges(msg.issueKey).then(sendResponse);
+    return true;
   }
 
   if (msg.type === MSG.POPUP_SET_FAB_ENABLED) {

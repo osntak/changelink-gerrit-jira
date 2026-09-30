@@ -1,4 +1,5 @@
-// Shared runtime message types used across service worker, popup, and content script.
+// Shared runtime message types (and the Jira URL helper) used across service
+// worker, popup, and content script.
 (function initMessageTypes(root) {
   const MESSAGE_TYPES = Object.freeze({
     EXTRACT_CONTEXT: 'EXTRACT_CONTEXT',
@@ -21,7 +22,28 @@
     OPEN_OPTIONS: 'OPEN_OPTIONS',
     TEST_CONNECTION: 'TEST_CONNECTION',
     SET_SITES: 'SET_SITES',
+    GET_GERRIT_CHANGES: 'GET_GERRIT_CHANGES',
   });
 
+  // Issue key of a Jira page: an issue opened over a board/backlog/search as
+  // ?selectedIssue=KEY, /browse/KEY, .../issues/KEY, or a service desk queue
+  // URL ending in the key.
+  function jiraIssueKeyFromUrl(url) {
+    try {
+      const u = new URL(url);
+      // Confluence shares the Jira Cloud origin; its pages are never issues.
+      if (u.pathname.startsWith('/wiki/')) return '';
+      const key = [
+        u.searchParams.get('selectedIssue'),
+        (u.pathname.match(/\/(?:browse|issues)\/([^/]+)/) || [])[1],
+        u.pathname.split('/').pop(),
+      ].find((k) => k && /^[A-Z][A-Z0-9]+-\d+$/i.test(k));
+      return key ? key.toUpperCase() : '';
+    } catch {
+      return '';
+    }
+  }
+
   root.MESSAGE_TYPES = MESSAGE_TYPES;
+  root.jiraIssueKeyFromUrl = jiraIssueKeyFromUrl;
 })(typeof self !== 'undefined' ? self : window);
