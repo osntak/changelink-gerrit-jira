@@ -23,6 +23,11 @@ const previewTextEl = document.getElementById('preview-text');
 const btnPreviewSubmit = document.getElementById('btn-preview-submit');
 const btnPreviewCancel = document.getElementById('btn-preview-cancel');
 const gerritListEl = document.getElementById('gerrit-list');
+const transitionFormEl = document.getElementById('transition-form');
+const transitionFieldsEl = document.getElementById('transition-fields');
+const btnTransitionSubmit = document.getElementById('btn-transition-submit');
+const btnTransitionCancel = document.getElementById('btn-transition-cancel');
+let currentTransitions = [];
 
 // Opened on a Jira issue page: show only the Gerrit changes that mention the
 // issue (body.jira-mode hides the Gerrit-change UI).
@@ -140,8 +145,9 @@ function buildIssueUrl(issueKey) {
 
 function loadFabSetting() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(['fabEnabled', 'previewEnabled'], ({ fabEnabled, previewEnabled: pe }) => {
-      const enabled = fabEnabled !== false;
+    // FAB on/off is per site; the switch shows the one for the site of this tab.
+    chrome.storage.local.get(['fabEnabled', 'fabEnabledJira', 'previewEnabled'], ({ fabEnabled, fabEnabledJira, previewEnabled: pe }) => {
+      const enabled = (jiraMode ? fabEnabledJira : fabEnabled) !== false;
       fabEnabledEl.checked = enabled;
       previewEnabled = pe !== false;
       resolve(enabled);
@@ -176,6 +182,8 @@ function hideIssueCard() {
 }
 
 function resetTransitionUi() {
+  currentTransitions = [];
+  closeTransitionForm();
   issueStatusSelectEl.innerHTML = '';
   const current = document.createElement('option');
   current.value = '';
@@ -188,6 +196,7 @@ function resetTransitionUi() {
 function renderTransitions(transitions) {
   resetTransitionUi();
   if (!Array.isArray(transitions) || transitions.length === 0) return;
+  currentTransitions = transitions;
 
   for (const t of transitions) {
     const target = t.toStatus || t.name;
@@ -213,19 +222,89 @@ async function loadTransitions(issueKey) {
   }
 }
 
-async function applyTransition() {
+function closeTransitionForm() {
+  transitionFormEl.style.display = 'none';
+  transitionFieldsEl.textContent = '';
+}
+
+// Picking a status: transitions without required fields run right away; the rest
+// open a small form, like the dialog Jira shows for Resolved.
+function onTransitionPicked() {
+  closeTransitionForm();
+  const t = currentTransitions.find((x) => x.id === issueStatusSelectEl.value);
+  if (!t) return;
+  const needs = Array.isArray(t.needs) ? t.needs : [];
+  if (!needs.length) {
+    applyTransition();
+    return;
+  }
+  // Only resolution is asked here. Any other empty required field (fix version,
+  // severity, free text...) is left to Jira's own dialog.
+  const blocking = needs.filter((f) => f.key !== 'resolution' || !f.options?.length);
+  if (blocking.length) {
+    setStatus(I18N.t('popup.transition.needsJira', {
+      status: t.toStatus || t.name,
+      fields: blocking.map((f) => f.name).join(', '),
+    }), 'warn');
+    issueStatusSelectEl.value = '';
+    return;
+  }
+
+  for (const f of needs) {
+    const label = document.createElement('span');
+    label.textContent = f.name;
+    const select = document.createElement('select');
+    select.dataset.key = f.key;
+    select.dataset.multi = f.multi ? '1' : '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = I18N.t('popup.transition.pick');
+    select.appendChild(placeholder);
+    for (const o of f.options) {
+      const option = document.createElement('option');
+      option.value = o.id;
+      option.textContent = o.name;
+      select.appendChild(option);
+    }
+    // Jira's default resolution comes preselected (an unknown id leaves "Select").
+    select.value = f.value || '';
+    transitionFieldsEl.append(label, select);
+  }
+  transitionFormEl.style.display = 'block';
+  // Everything else waits until the form is submitted or cancelled, including the
+  // status select and the issue key (the form belongs to this issue and status).
+  setActionBusy(true);
+  issueStatusSelectEl.disabled = true;
+  issueKeyInputEl.disabled = true;
+  setStatus(I18N.t('popup.transition.fillFields'), '');
+}
+
+function submitTransitionForm() {
+  const selects = [...transitionFieldsEl.querySelectorAll('select')];
+  if (selects.some((s) => !s.value)) {
+    setStatus(I18N.t('popup.transition.pickAll'), 'warn');
+    return;
+  }
+  applyTransition(selects.map((s) => ({ key: s.dataset.key, id: s.value, multi: !!s.dataset.multi })));
+}
+
+async function applyTransition(fields) {
   const issueKey = getEffectiveIssueKey();
   const transitionId = issueStatusSelectEl.value;
   if (!issueKey || !transitionId) return;
 
   setActionBusy(true);
   issueStatusSelectEl.disabled = true;
+  // A second click while the first request runs would send the transition twice.
+  btnTransitionSubmit.disabled = true;
+  btnTransitionCancel.disabled = true;
   setStatus(I18N.t('popup.status.transitioning'), '');
   try {
     const resp = await sendMessage({
       type: MSG.POPUP_DO_TRANSITION,
       issueKey,
       transitionId,
+      fields,
     });
     if (!resp?.ok) {
       setStatus(resp?.message || I18N.t('popup.status.transitionFailed'), 'err');
@@ -233,13 +312,17 @@ async function applyTransition() {
       issueStatusSelectEl.disabled = false;
       return;
     }
-    setStatus(I18N.t('popup.status.transitionDone', { key: issueKey }), 'ok');
     await fetchIssue();
+    // After fetchIssue so its own "issue loaded" line does not hide this one.
+    setStatus(I18N.t('popup.status.transitionDone', { key: issueKey }), 'ok');
   } catch {
     setStatus(I18N.t('popup.status.requestError'), 'err');
     issueStatusSelectEl.value = '';
     issueStatusSelectEl.disabled = false;
   } finally {
+    closeTransitionForm();
+    btnTransitionSubmit.disabled = false;
+    btnTransitionCancel.disabled = false;
     setActionBusy(false);
   }
 }
@@ -443,7 +526,7 @@ async function applyLinkAndComment() {
       setStatus(resp?.message || I18N.t('popup.status.applyFailed'), 'err');
       return;
     }
-    setStatus(resp.message || I18N.t('popup.status.applyDone', { key: issueKey }), 'ok');
+    setStatus(resp.message || I18N.t('popup.status.applyDone', { key: issueKey }), resp.transitionFailed ? 'warn' : 'ok');
     commentDuplicate = true;
     renderCommentState();
   } catch {
@@ -524,7 +607,7 @@ async function submitPreview() {
     setStatus(
       resp.message
         || I18N.t(mode === 'apply' ? 'popup.status.applyDone' : 'popup.status.commentDone', { key: issueKey }),
-      'ok',
+      resp.transitionFailed ? 'warn' : 'ok',
     );
     commentDuplicate = true;
     renderCommentState();
@@ -553,18 +636,18 @@ function openIssuePage() {
 
 // -- Jira mode: Gerrit changes mentioning the issue --------------------------------
 
-async function getJiraTabIssueKey() {
+/** @returns {Promise<{ onJira: boolean, key: string }>} key is '' off an issue page */
+async function getJiraTab() {
   const [{ jiraBase: base }, [tab]] = await Promise.all([
     chrome.storage.local.get(['jiraBase']),
     chrome.tabs.query({ active: true, currentWindow: true }),
   ]);
-  if (!base || !tab?.url) return '';
   try {
-    if (new URL(tab.url).origin !== base) return '';
+    if (!base || !tab?.url || new URL(tab.url).origin !== base) return { onJira: false, key: '' };
   } catch {
-    return '';
+    return { onJira: false, key: '' };
   }
-  return self.jiraIssueKeyFromUrl(tab.url);
+  return { onJira: true, key: self.jiraIssueKeyFromUrl(tab.url) };
 }
 
 function appendGerritNote(text) {
@@ -574,9 +657,24 @@ function appendGerritNote(text) {
   gerritListEl.appendChild(note);
 }
 
+function appendGerritLink(href, text) {
+  const link = document.createElement('a');
+  link.className = 'login-link';
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = text;
+  gerritListEl.appendChild(link);
+}
+
 async function loadGerritChanges() {
   const key = getEffectiveIssueKey();
   gerritListEl.textContent = '';
+  document.getElementById('head-key').textContent = key ? ` · ${key}` : '';
+  if (!key) {
+    setStatus(I18N.t('popup.status.enterIssueKeyJira'), 'warn');
+    return;
+  }
   btnRefresh.disabled = true;
   setStatus(I18N.t('gerrit.loading'), '');
   try {
@@ -585,9 +683,11 @@ async function loadGerritChanges() {
       setStatus(resp?.message || I18N.t('popup.status.requestError'), 'err');
       return;
     }
-    setStatus(I18N.t('popup.status.gerritDone', { n: resp.changes.length }), 'ok');
+    if (resp.signedIn) setStatus(I18N.t('popup.status.gerritDone', { n: resp.changes.length }), 'ok');
+    else setStatus(I18N.t('gerrit.notSignedIn'), 'warn');
     if (!resp.changes.length) {
-      appendGerritNote(I18N.t('gerrit.empty', { key }));
+      if (resp.signedIn) appendGerritNote(I18N.t('gerrit.empty'));
+      if (resp.loginUrl) appendGerritLink(resp.loginUrl, I18N.t('gerrit.signIn'));
       return;
     }
     for (const c of resp.changes) {
@@ -611,7 +711,7 @@ async function loadGerritChanges() {
       item.append(head, meta);
       gerritListEl.appendChild(item);
     }
-    if (resp.more) appendGerritNote(I18N.t('gerrit.more', { n: resp.changes.length }));
+    if (resp.more && resp.searchUrl) appendGerritLink(resp.searchUrl, I18N.t('gerrit.viewAll'));
   } catch {
     setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
@@ -619,11 +719,15 @@ async function loadGerritChanges() {
   }
 }
 
+// On a Jira page that is not an issue (board, filter...), only the issue key
+// field is shown; Enter looks up the changes for the typed key.
 async function initJiraMode(issueKey) {
   jiraMode = true;
   document.body.classList.add('jira-mode');
+  document.body.classList.toggle('jira-nokey', !issueKey);
   issueKeyInputEl.value = issueKey;
-  document.getElementById('head-key').textContent = ` · ${issueKey}`;
+  syncActionButtons();
+  if (!issueKey) issueKeyInputEl.focus();
   await loadGerritChanges();
 }
 
@@ -676,8 +780,14 @@ btnOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
 btnOpenIssue.addEventListener('click', openIssuePage);
-issueStatusSelectEl.addEventListener('change', () => {
-  if (issueStatusSelectEl.value) applyTransition();
+issueStatusSelectEl.addEventListener('change', onTransitionPicked);
+btnTransitionSubmit.addEventListener('click', submitTransitionForm);
+btnTransitionCancel.addEventListener('click', () => {
+  closeTransitionForm();
+  issueStatusSelectEl.value = '';
+  issueStatusSelectEl.disabled = false;
+  setActionBusy(false);
+  setStatus(I18N.t('popup.status.cancelled'), '');
 });
 
 I18N.init(async () => {
@@ -686,10 +796,11 @@ I18N.init(async () => {
   authConfigured = true;
   syncActionButtons();
   await loadAuthState();
+  const jiraTab = await getJiraTab();
+  jiraMode = jiraTab.onJira;
   await loadFabSetting();
-  const jiraKey = await getJiraTabIssueKey();
-  if (jiraKey) {
-    await initJiraMode(jiraKey);
+  if (jiraTab.onJira) {
+    await initJiraMode(jiraTab.key);
     return;
   }
   const ready = await loadContext();

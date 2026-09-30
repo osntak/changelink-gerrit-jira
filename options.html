@@ -406,7 +406,7 @@
     <h1 data-i18n="options.title">설정</h1>
     <p class="subtitle" data-i18n-html="options.subtitle">
       Changelink의 계정 연결, 동작 방식, 댓글 템플릿을 관리합니다.<br>
-      변경 사항은 저장 즉시 모든 Gerrit 탭에 반영됩니다.
+      변경 사항은 저장 즉시 열려 있는 Gerrit·Jira 탭에 반영됩니다.
     </p>
 
   <label for="gerrit-url" data-i18n="options.field.gerritUrl">Gerrit 주소</label>
@@ -466,6 +466,34 @@
     API 토큰은 Atlassian 계정에서 발급한 값을 사용하세요.
   </div>
 
+  <label for="gerrit-user" data-i18n="options.field.gerritUser">Gerrit 사용자명 (선택)</label>
+  <input
+    type="text"
+    id="gerrit-user"
+    autocomplete="off"
+    spellcheck="false"
+  >
+
+  <label for="gerrit-password" data-i18n="options.field.gerritPassword">Gerrit HTTP 비밀번호 (선택)</label>
+  <div class="pw-field">
+    <input
+      type="password"
+      id="gerrit-password"
+      autocomplete="off"
+      spellcheck="false"
+    >
+    <button type="button" id="btn-gerrit-password-visibility" class="pw-toggle" aria-label="토큰 표시" data-i18n-label="options.a11y.showToken" aria-pressed="false">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+        <path d="M1.8 12S5.5 5.4 12 5.4 22.2 12 22.2 12 18.5 18.6 12 18.6 1.8 12 1.8 12Z"/>
+        <circle cx="12" cy="12" r="3.2"/>
+        <line class="pw-slash" x1="4.5" y1="19.5" x2="19.5" y2="4.5"/>
+      </svg>
+    </button>
+  </div>
+  <div class="field-note" data-i18n="options.note.gerritPassword">
+    Jira 이슈에서 관련 change 를 찾을 때 씁니다. Gerrit 설정의 HTTP Credentials 에서 발급합니다. 비워 두면 브라우저의 Gerrit 로그인을 씁니다.
+  </div>
+
   <div class="btn-row">
     <button id="btn-save" data-i18n="options.btn.save">저장</button>
     <button id="btn-test" data-i18n="options.btn.test">연결 테스트</button>
@@ -490,15 +518,16 @@
       <span class="switch"><input type="checkbox" id="opt-preview"><span class="knob"></span></span>
     </label>
 
-    <label class="toggle-row" for="opt-pill">
-      <span data-i18n="options.toggle.pill">Gerrit 페이지에 이슈 상태 배지(pill) 표시</span>
-      <span class="switch"><input type="checkbox" id="opt-pill"><span class="knob"></span></span>
-    </label>
-
     <label class="toggle-row" for="opt-transition-name">
       <span data-i18n="options.toggle.transition">반영 처리 시 이슈 상태 전환</span>
       <select id="opt-transition-name">
         <option value="" data-i18n="options.transition.off">사용 안 함</option>
+      </select>
+    </label>
+    <label class="toggle-row" for="opt-resolution">
+      <span data-i18n="options.toggle.resolution">상태 전환 시 해결 값</span>
+      <select id="opt-resolution">
+        <option value="" data-i18n="options.resolution.none">지정 안 함</option>
       </select>
     </label>
     <div class="field-note" data-i18n="options.note.transition">
@@ -567,9 +596,17 @@ Change-Id: {change_id}"
         >Atlassian 계정 설정</a>
         에서 발급하세요.
       </li>
+      <li data-i18n-html="options.help.gerritPassword">
+        Gerrit HTTP 비밀번호 (선택): Gerrit 오른쪽 위 설정 → <code>HTTP Credentials</code> 에서
+        <code>Generate New Password</code> 로 발급합니다. 사용자명도 같은 화면에 있습니다.
+      </li>
       <li data-i18n="options.help.popup">
         Gerrit change 페이지에서 툴바 아이콘을 클릭하면 popup이 열리며
         이슈 조회/웹링크 추가/코멘트 생성을 실행할 수 있습니다.
+      </li>
+      <li data-i18n="options.help.jiraPopup">
+        Jira 이슈 페이지에서 툴바 아이콘이나 빠른 실행 버튼을 누르면 커밋 메시지에 그 이슈키가
+        들어간 Gerrit change 목록이 보입니다.
       </li>
       <li data-i18n-html="options.help.issueKey">
         이슈 키는 change 제목(예: <code>[PROJ-123] Fix bug</code>) 또는

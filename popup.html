@@ -175,6 +175,20 @@
       margin-top: 8px;
     }
 
+    /* Required fields of a transition screen (e.g. resolution for Resolved). */
+    .transition-form {
+      display: none;
+      margin-top: 8px;
+      padding: 8px 10px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f9fbfe;
+    }
+
+    .transition-form .info-grid {
+      margin-top: 0;
+    }
+
     .preview-head {
       font-size: 12px;
       font-weight: 700;
@@ -300,12 +314,16 @@
     .change-list { display: none; }
     body.jira-mode { width: 520px; }
     .head-key { color: var(--sub); font-weight: 600; }
+    .login-link { justify-self: start; color: var(--pri); font-weight: 600; font-size: 12px; }
     body.jira-mode .issue-title,
     body.jira-mode .info-grid,
     body.jira-mode .comment-state,
     body.jira-mode .btn-row,
     body.jira-mode .preview-panel { display: none; }
     body.jira-mode .change-list { margin-top: 8px; display: grid; gap: 2px; max-height: 420px; overflow: auto; }
+    /* Jira page that is not an issue: keep only the issue key row to type one. */
+    body.jira-mode.jira-nokey .info-grid { display: grid; }
+    body.jira-mode.jira-nokey .info-grid > :nth-child(n+3) { display: none; }
     .change-item { display: block; padding: 6px 8px; border-radius: 7px; color: var(--ink); text-decoration: none; }
     .change-item:hover { background: #f4f8ff; }
     .change-item .subject { font-weight: 600; word-break: break-word; }
@@ -313,6 +331,7 @@
     .change-status { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 4px; font-size: 10.5px; font-weight: 700; color: #fff; background: #8a94a6; }
     .change-status.NEW { background: var(--pri); }
     .change-status.MERGED { background: var(--ok); }
+    .change-status.WIP { background: #b26a00; }
     .change-empty { margin-top: 8px; color: var(--sub); font-size: 12px; white-space: pre-line; }
 
     .status.ok { background: #e8f5e9; color: var(--ok); }
@@ -351,6 +370,13 @@
         </select>
         <span data-i18n="popup.label.assignee">Assignee</span>
         <div id="issue-assignee" class="value">-</div>
+      </div>
+      <div id="transition-form" class="transition-form">
+        <div id="transition-fields" class="info-grid"></div>
+        <div class="preview-actions">
+          <button id="btn-transition-submit" class="primary" data-i18n="popup.btn.transitionSubmit">상태 변경</button>
+          <button id="btn-transition-cancel" data-i18n="popup.btn.previewCancel">취소</button>
+        </div>
       </div>
       <div id="issue-comment-state" class="comment-state"></div>
       <div id="gerrit-list" class="change-list"></div>

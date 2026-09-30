@@ -48,7 +48,7 @@ Then open `chrome://extensions`, turn on Developer mode, and load the unpacked f
 
 ## Setup
 
-Open the options page (extension icon, then the gear button) and fill in four fields:
+Open the options page (extension icon, then the gear button) and fill in these fields:
 
 | Field | Example |
 | --- | --- |
@@ -56,11 +56,21 @@ Open the options page (extension icon, then the gear button) and fill in four fi
 | Jira URL | `https://yourcompany.atlassian.net` |
 | Jira email | `dev@example.com` |
 | Jira API token | [create one here](https://id.atlassian.com/manage-profile/security/api-tokens) |
+| Gerrit username, HTTP password (optional) | Gerrit settings → HTTP Credentials |
 
 Saving asks for access to those two sites. That prompt is the extension requesting host
 permissions for the URLs you just typed, and it has to be allowed for anything to work.
 The connection test checks the credentials against `/rest/api/3/myself` and reports the
 HTTP status, so a wrong token says 401 instead of failing silently later.
+
+The Gerrit username and HTTP password are only used to find related changes from a Jira
+issue. Leave them empty and the browser's Gerrit login session is used instead. When they
+are filled in, the connection test checks them too, against `/a/accounts/self`.
+
+When Apply moves an issue to a status that sets a resolution (such as Resolved), you can
+pick which one (such as Fixed) with "Resolution for the transition" in the options. Jira's
+default, usually Done, is preselected. If the issue has other required fields
+left empty (such as fix version), the status is left unchanged and you are told why.
 
 <p align="center">
   <img src="store-assets/screenshot-options.png" width="760" alt="Options page">
@@ -96,7 +106,7 @@ The template is yours to edit on the options page. Available placeholders:
 | Permission | Why |
 | --- | --- |
 | `storage` | Keeps your URLs, credentials and template in `chrome.storage.local` |
-| `scripting` | Registers the content script on your Gerrit host, and re-injects it into open tabs after an extension reload |
+| `scripting` | Registers the content script on your Gerrit and Jira hosts, and re-injects it into open tabs after an extension reload |
 | optional host access | Your Gerrit and Jira URLs, requested when you save them |
 
 The manifest asks for no host up front. Which two sites this extension may touch is
@@ -116,8 +126,8 @@ logged. See [PRIVACY.md](PRIVACY.md).
 
 | File | Role |
 | --- | --- |
-| `service_worker.js` | Every Jira API call. Nothing else makes network requests |
-| `content_script.js` | Reads the change context out of the Gerrit DOM, draws the quick action button and status badge |
+| `service_worker.js` | Every Jira API call and the Gerrit change search. Apart from the content script reading the open change's own details from Gerrit, nothing else makes network requests |
+| `content_script.js` | Reads the change context out of the Gerrit DOM, draws the quick action button and status badge. On Jira, draws the button that lists related Gerrit changes |
 | `popup.js` | The toolbar popup |
 | `options.js` | Settings, credential test, host permission request |
 | `i18n.js` | String table and language resolution shared by all four |

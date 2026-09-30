@@ -198,9 +198,10 @@ function loadBehaviorSettings() {
   });
 }
 
-function setFabEnabled(enabled) {
+// FAB on/off is kept per site: fabEnabled for Gerrit, fabEnabledJira for Jira.
+function setFabEnabled(enabled, onJira) {
   return new Promise((resolve) => {
-    chrome.storage.local.set({ fabEnabled: !!enabled }, resolve);
+    chrome.storage.local.set({ [onJira ? 'fabEnabledJira' : 'fabEnabled']: !!enabled }, resolve);
   });
 }
 
@@ -479,7 +480,7 @@ const jiraClient = {
     }
 
     const resp = await this.fetch(
-      `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`,
+      `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions?expand=transitions.fields`,
       { method: 'GET' },
     );
 
@@ -491,11 +492,51 @@ const jiraClient = {
 
     const json = await resp.json();
     const transitions = Array.isArray(json?.transitions) ? json.transitions : [];
+
+    // A transition screen can require fields (e.g. resolution when moving to
+    // Resolved). Only the ones still empty on the issue need input; Jira keeps the
+    // current value of the rest (fix version, severity and so on).
+    const requiredKeys = [...new Set(transitions.flatMap((t) =>
+      Object.entries(t?.fields || {}).filter(([, f]) => f?.required).map(([key]) => key)))];
+    const current = requiredKeys.length ? await this.getIssueFields(issueKey, requiredKeys) : {};
+    // The popup preselects the site default resolution, so "Change status" alone
+    // does what a plain Jira transition would.
+    const defaultResolution = requiredKeys.includes('resolution') && isEmptyFieldValue(current.resolution)
+      ? await this.getResolutions().then((list) => list.find((r) => r.isDefault)?.id || '').catch(() => '')
+      : '';
+
     return transitions.map((t) => ({
       id: String(t?.id || ''),
       name: String(t?.name || ''),
       toStatus: String(t?.to?.name || ''),
+      needs: Object.entries(t?.fields || {})
+        .filter(([key, f]) => f?.required && isEmptyFieldValue(current[key]))
+        .map(([key, f]) => ({
+          key,
+          name: String(f.name || key),
+          multi: f.schema?.type === 'array',
+          value: key === 'resolution' ? defaultResolution : '',
+          // Empty when the field is free text/date: the popup then sends the user to Jira.
+          options: (Array.isArray(f.allowedValues) ? f.allowedValues : [])
+            .filter((v) => !v?.archived)
+            .map((v) => ({ id: String(v?.id || ''), name: String(v?.name ?? v?.value ?? '') }))
+            .filter((o) => o.id && o.name),
+        })),
     })).filter((t) => t.id && t.name);
+  },
+
+  // Current values of the given fields; {} on failure, so every required field is asked for.
+  async getIssueFields(issueKey, keys) {
+    try {
+      const resp = await this.fetch(
+        `/rest/api/3/issue/${encodeURIComponent(issueKey)}?fields=${keys.map(encodeURIComponent).join(',')}`,
+        { method: 'GET' },
+      );
+      if (resp.status !== 200) return {};
+      return (await resp.json())?.fields || {};
+    } catch {
+      return {};
+    }
   },
 
   async getStatuses() {
@@ -513,7 +554,22 @@ const jiraClient = {
     return [...new Set(names)].sort((a, b) => a.localeCompare(b, 'ko'));
   },
 
-  async doTransition(issueKey, transitionId) {
+  // The search endpoint also marks the site default: the resolution Jira applies
+  // when a transition sends none (Done on this kind of site).
+  async getResolutions() {
+    const resp = await this.fetch('/rest/api/3/resolution/search?maxResults=100', { method: 'GET' });
+    if (resp.status !== 200) {
+      const error = new Error('Resolution list request failed');
+      error.status = resp.status;
+      throw error;
+    }
+    const json = await resp.json();
+    return (Array.isArray(json?.values) ? json.values : [])
+      .map((r) => ({ id: String(r?.id || ''), name: String(r?.name || ''), isDefault: !!r?.isDefault }))
+      .filter((r) => r.id && r.name);
+  },
+
+  async doTransition(issueKey, transitionId, fields) {
     if (!isValidIssueKey(issueKey)) {
       const error = new Error('Invalid issue key');
       error.code = 'invalid_issue_key';
@@ -524,7 +580,10 @@ const jiraClient = {
       `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`,
       {
         method: 'POST',
-        body: { transition: { id: String(transitionId) } },
+        body: {
+          transition: { id: String(transitionId) },
+          ...(fields && Object.keys(fields).length ? { fields } : {}),
+        },
       },
     );
 
@@ -693,7 +752,24 @@ async function handlePopupGetTransitions(issueKey) {
   }
 }
 
-async function handlePopupDoTransition(issueKey, transitionId) {
+function isEmptyFieldValue(value) {
+  return value == null || value === '' || (Array.isArray(value) && value.length === 0);
+}
+
+// Popup sends [{ key, id, multi }] for the required fields it asked for; Jira wants
+// { key: { id } } or, for array fields such as fixVersions, { key: [{ id }] }.
+function buildTransitionFields(values) {
+  const fields = {};
+  for (const v of Array.isArray(values) ? values : []) {
+    const key = String(v?.key || '');
+    const id = String(v?.id || '');
+    if (!/^\w+$/.test(key) || !id) continue;
+    fields[key] = v.multi ? [{ id }] : { id };
+  }
+  return fields;
+}
+
+async function handlePopupDoTransition(issueKey, transitionId, fieldValues) {
   const id = String(transitionId || '').trim();
   if (!id) {
     return { ok: false, message: I18N.t('sw.error.pickTransition') };
@@ -701,7 +777,7 @@ async function handlePopupDoTransition(issueKey, transitionId) {
 
   try {
     const key = String(issueKey || '').trim();
-    await jiraClient.doTransition(key, id);
+    await jiraClient.doTransition(key, id, buildTransitionFields(fieldValues));
     return { ok: true };
   } catch (err) {
     return {
@@ -865,7 +941,23 @@ async function transitionByNameIfConfigured(issueKey) {
         note: I18N.t('sw.transition.noMatch', { name: applyTransitionName }),
       };
     }
-    await jiraClient.doTransition(issueKey, match.id);
+
+    // Same rule as the popup: only resolution is filled in here, from the default
+    // chosen in options. Without one it is left out and Jira applies its own
+    // default resolution (Done on Jira Cloud), as a transition always did before.
+    // Any other empty required field is left to Jira's own dialog.
+    const { applyResolution } = await chrome.storage.local.get(['applyResolution']);
+    const needs = match.needs || [];
+    const blocking = needs.filter((f) => f.key !== 'resolution');
+    if (blocking.length) {
+      return {
+        attempted: true,
+        ok: false,
+        note: I18N.t('sw.transition.needsFields', { fields: blocking.map((f) => f.name).join(', ') }),
+      };
+    }
+    const fields = needs.length && applyResolution?.id ? { resolution: { id: String(applyResolution.id) } } : {};
+    await jiraClient.doTransition(issueKey, match.id, fields);
     return { attempted: true, ok: true, note: match.toStatus || match.name };
   } catch (err) {
     return {
@@ -917,6 +1009,9 @@ async function handlePopupQuickApply(issueKeyOverride, commentText, force) {
       ok: true,
       issueKey,
       transitioned: !!(transition.attempted && transition.ok),
+      // Link and comment went through but the status did not change: callers show
+      // this as a warning, not a plain success.
+      transitionFailed: !!(transition.attempted && !transition.ok),
       message: summary,
     };
   } catch (err) {
@@ -928,9 +1023,9 @@ async function handlePopupQuickApply(issueKeyOverride, commentText, force) {
 }
 
 async function handlePopupSetFabEnabled(enabled) {
-  await setFabEnabled(enabled);
-
   const tab = await getActiveTab();
+  await setFabEnabled(enabled, !!tab?.url && isJiraTab(tab.url));
+
   if (!tab || !tab.id || !tab.url || !(isGerritTab(tab.url) || isJiraTab(tab.url))) {
     return {
       ok: true,
@@ -951,24 +1046,36 @@ async function handlePopupSetFabEnabled(enabled) {
   }
 }
 
-// Changes whose commit message mentions the issue key. Uses the browser's Gerrit
-// login cookie, so it sees what the user sees in the Gerrit UI.
+// Changes whose commit message mentions the issue key. With a Gerrit HTTP password
+// saved in options, authenticates as that account (it wins over the browser
+// session, and a wrong password is reported rather than silently falling back).
+// Otherwise uses the browser's Gerrit login cookie, seeing what the Gerrit UI sees.
 async function handleGetGerritChanges(issueKey) {
   const key = String(issueKey || '').trim().toUpperCase();
   if (!isValidIssueKey(key)) return { ok: false, message: I18N.t('sw.error.noIssueKey') };
   if (!sites.gerritOrigin) return { ok: false, message: I18N.t('sw.error.noGerritOrigin') };
 
-  const limit = 50;
+  const { gerritUser, gerritPassword } = await chrome.storage.local.get(['gerritUser', 'gerritPassword']);
+  const basic = gerritUser && gerritPassword ? basicAuth(gerritUser, gerritPassword) : '';
+
+  // An issue rarely has more than a handful of changes; past this the popup links
+  // to the full Gerrit search instead of growing a long list.
+  const limit = 10;
   const query = encodeURIComponent(`message:"${key}"`);
   let resp;
   try {
     resp = await fetch(
-      `${sites.gerritOrigin}/changes/?q=${query}&n=${limit}&o=DETAILED_ACCOUNTS`,
-      { credentials: 'include', headers: { Accept: 'application/json' } },
+      `${sites.gerritOrigin}${basic ? '/a' : ''}/changes/?q=${query}&n=${limit}&o=DETAILED_ACCOUNTS`,
+      basic
+        ? { credentials: 'omit', headers: { Accept: 'application/json', Authorization: `Basic ${basic}` } }
+        : { credentials: 'include', headers: { Accept: 'application/json' } },
     );
   } catch {
     // Also lands here when an SSO login redirect leaves the Gerrit origin.
     return { ok: false, message: I18N.t('sw.gerrit.unreachable') };
+  }
+  if (basic && resp.status === 401) {
+    return { ok: false, message: I18N.t('sw.gerrit.badPassword') };
   }
   if (!resp.ok || new URL(resp.url).origin !== sites.gerritOrigin) {
     return { ok: false, message: I18N.t('sw.gerrit.searchFailed', { status: resp.status }) };
@@ -983,20 +1090,40 @@ async function handleGetGerritChanges(issueKey) {
   }
   if (!Array.isArray(list)) list = [];
 
+  // An anonymous search still succeeds but only sees public changes, so an empty
+  // result needs a login check: /accounts/self answers 403 without a session.
+  let signedIn = true;
+  if (!list.length && !basic) {
+    const me = await fetch(`${sites.gerritOrigin}/accounts/self`, { credentials: 'include' }).catch(() => null);
+    signedIn = !!me?.ok && new URL(me.url).origin === sites.gerritOrigin;
+  }
+
   return {
     ok: true,
+    signedIn,
+    loginUrl: signedIn ? '' : `${sites.gerritOrigin}/login/`,
     more: !!list[list.length - 1]?._more_changes,
+    searchUrl: `${sites.gerritOrigin}/q/${query}`,
     changes: list.map((c) => ({
       number: c._number,
       subject: String(c.subject || ''),
-      status: String(c.status || ''),
+      // Gerrit's UI shows work-in-progress changes as WIP rather than NEW.
+      status: c.work_in_progress && c.status === 'NEW' ? 'WIP' : String(c.status || ''),
       project: String(c.project || ''),
       branch: String(c.branch || ''),
       owner: String(c.owner?.name || c.owner?.username || ''),
-      date: formatDateMaybe(c.submitted || c.updated).slice(0, 10),
+      // Merged changes show when they were merged; the rest when they last changed.
+      date: c.submitted
+        ? I18N.t('gerrit.date.merged', { date: formatDateMaybe(c.submitted).slice(0, 10) })
+        : I18N.t('gerrit.date.updated', { date: formatDateMaybe(c.updated).slice(0, 10) }),
       url: `${sites.gerritOrigin}/c/${encodeURIComponent(c.project).replace(/%2F/g, '/')}/+/${c._number}`,
     })),
   };
+}
+
+// btoa only takes Latin-1; encode as UTF-8 first so non-ASCII usernames work.
+function basicAuth(user, password) {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(`${user}:${password}`)));
 }
 
 function dispatchMessage(msg, sendResponse) {
@@ -1008,7 +1135,7 @@ function dispatchMessage(msg, sendResponse) {
   }
 
   if (msg.type === MSG.TEST_CONNECTION) {
-    handleTestConnection(msg.email, msg.token).then(sendResponse);
+    handleTestConnection(msg.email, msg.token, msg.gerritUser, msg.gerritPassword).then(sendResponse);
     return true;
   }
 
@@ -1038,7 +1165,7 @@ function dispatchMessage(msg, sendResponse) {
   }
 
   if (msg.type === MSG.POPUP_DO_TRANSITION) {
-    handlePopupDoTransition(msg.issueKey, msg.transitionId).then(sendResponse);
+    handlePopupDoTransition(msg.issueKey, msg.transitionId, msg.fields).then(sendResponse);
     return true;
   }
 
@@ -1062,6 +1189,13 @@ function dispatchMessage(msg, sendResponse) {
     return true;
   }
 
+  if (msg.type === MSG.GET_JIRA_RESOLUTIONS) {
+    jiraClient.getResolutions()
+      .then((resolutions) => sendResponse({ ok: true, resolutions }))
+      .catch(() => sendResponse({ ok: false, resolutions: [] }));
+    return true;
+  }
+
   if (msg.type === MSG.GET_JIRA_STATUSES) {
     jiraClient.getStatuses()
       .then((statuses) => sendResponse({ ok: true, statuses }))
@@ -1076,7 +1210,10 @@ function dispatchMessage(msg, sendResponse) {
   }
 
   if (msg.type === MSG.GET_GERRIT_CHANGES) {
-    handleGetGerritChanges(msg.issueKey).then(sendResponse);
+    // A stray exception must still answer, or the popup stays on "Searching...".
+    handleGetGerritChanges(msg.issueKey)
+      .then(sendResponse)
+      .catch(() => sendResponse({ ok: false, message: I18N.t('sw.gerrit.unreachable') }));
     return true;
   }
 
@@ -1094,7 +1231,29 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true;
 });
 
-async function handleTestConnection(email, token) {
+// Gerrit HTTP password check: /a/accounts/self answers 200 for valid Basic credentials.
+async function testGerritCredentials(gerritUser, gerritPassword) {
+  if (!sites.gerritOrigin) return { noSite: true };
+  try {
+    const resp = await fetch(`${sites.gerritOrigin}/a/accounts/self`, {
+      headers: { Authorization: `Basic ${basicAuth(gerritUser, gerritPassword)}` },
+      credentials: 'omit',
+    });
+    return { status: resp.status };
+  } catch {
+    return { networkError: true };
+  }
+}
+
+async function handleTestConnection(email, token, gerritUser, gerritPassword) {
+  const gerrit = gerritUser && gerritPassword
+    ? await testGerritCredentials(gerritUser, gerritPassword)
+    : undefined;
+  if (!email && !token) return { gerrit };
+  return { ...(await testJiraCredentials(email, token)), gerrit };
+}
+
+async function testJiraCredentials(email, token) {
   // Diagnostics carry only lengths and server reason headers — never the values.
   const emailLength = String(email || '').length;
   const tokenLength = String(token || '').length;
