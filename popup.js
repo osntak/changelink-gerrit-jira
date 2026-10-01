@@ -4,11 +4,15 @@ const MSG = self.MESSAGE_TYPES;
 
 const issueTitleEl = document.getElementById('issue-title');
 const issueStatusSelectEl = /** @type {HTMLSelectElement} */ (document.getElementById('issue-status-select'));
+const btnStatusChange = document.getElementById('btn-status-change');
 const issueAssigneeEl = document.getElementById('issue-assignee');
-const issueCommentStateEl = document.getElementById('issue-comment-state');
+const changeLineEl = document.getElementById('change-line');
 const statusEl = document.getElementById('status');
+const confirmEl = document.getElementById('confirm');
+const confirmTextEl = document.getElementById('confirm-text');
+const btnConfirmYes = document.getElementById('btn-confirm-yes');
+const btnConfirmNo = document.getElementById('btn-confirm-no');
 const btnRefresh = document.getElementById('btn-refresh');
-const btnApply = document.getElementById('btn-apply');
 const btnLink = document.getElementById('btn-link');
 const btnComment = document.getElementById('btn-comment');
 const fabEnabledEl = document.getElementById('fab-enabled');
@@ -17,7 +21,6 @@ const issueKeyInputEl = document.getElementById('issue-key-input');
 const btnOpenIssue = document.getElementById('btn-open-issue');
 const btnRowEl = document.getElementById('btn-row');
 const previewPanelEl = document.getElementById('preview-panel');
-const previewTitleEl = document.getElementById('preview-title');
 const previewDupEl = document.getElementById('preview-dup');
 const previewTextEl = document.getElementById('preview-text');
 const btnPreviewSubmit = document.getElementById('btn-preview-submit');
@@ -36,9 +39,13 @@ let jiraMode = false;
 let currentContext = null;
 let authConfigured = true;
 let currentIssueStatus = '';
-let commentDuplicate = null; // null = unknown, true/false = checked
+// Whether this issue already has this change's comment / web link:
+// 'fresh' (not yet), 'has', 'unknown' (could not check) or 'busy'.
+let commentState = 'fresh';
+let linkState = 'fresh';
+// The issue those two states were read for; another key in the field makes them unknown.
+let recordKey = '';
 let previewEnabled = true;
-let previewMode = null; // 'comment' | 'apply'
 // Jira site URL is user-configured in options.
 let jiraBase = '';
 chrome.storage.local.get(['jiraBase'], ({ jiraBase: saved }) => { jiraBase = saved || ''; });
@@ -46,6 +53,24 @@ chrome.storage.local.get(['jiraBase'], ({ jiraBase: saved }) => { jiraBase = sav
 function setStatus(message, cls) {
   statusEl.textContent = message;
   statusEl.className = `status ${cls || ''}`.trim();
+}
+
+// In-popup confirm (window.confirm would cover the popup with a browser dialog).
+function askInline(text, yesLabel) {
+  return new Promise((resolve) => {
+    confirmTextEl.textContent = text;
+    btnConfirmYes.textContent = yesLabel;
+    confirmEl.classList.add('open');
+    btnConfirmYes.focus();
+    const done = (answer) => {
+      confirmEl.classList.remove('open');
+      btnConfirmYes.onclick = null;
+      btnConfirmNo.onclick = null;
+      resolve(answer);
+    };
+    btnConfirmYes.onclick = () => done(true);
+    btnConfirmNo.onclick = () => done(false);
+  });
 }
 
 function isGerritChangeUrl(url) {
@@ -57,69 +82,71 @@ function isGerritChangeUrl(url) {
   }
 }
 
+function paintActions() {
+  self.ChangeList.paintIcon(btnComment, 'comment', commentState, I18N.t('popup.btn.comment'));
+  self.ChangeList.paintIcon(btnLink, 'link', linkState, I18N.t('popup.btn.link'));
+}
+
 function syncActionButtons() {
-  issueKeyInputEl.disabled = false;
+  // An open preview belongs to the issue it was built for.
+  issueKeyInputEl.disabled = previewPanelEl.style.display === 'block';
   btnRefresh.disabled = false;
   const key = getEffectiveIssueKey();
-  btnApply.disabled = !authConfigured || !key;
+  if (key !== recordKey) {
+    // Another issue: what was read for the old one (comment, link, transitions) no longer applies.
+    commentState = linkState = 'unknown';
+    recordKey = key;
+    resetTransitionUi();
+  }
+  paintActions();
   btnLink.disabled = !authConfigured || !key;
   btnComment.disabled = !authConfigured || !key;
   btnOpenIssue.disabled = !key;
+  document.getElementById('head-key').textContent = key;
 }
 
 function setActionBusy(isBusy) {
   if (isBusy) {
+    // What is in flight belongs to the key it started with.
+    issueKeyInputEl.disabled = true;
     btnRefresh.disabled = true;
-    btnApply.disabled = true;
     btnLink.disabled = true;
     btnComment.disabled = true;
+    btnStatusChange.disabled = true;
     return;
   }
   syncActionButtons();
+  btnStatusChange.disabled = !issueStatusSelectEl.value;
 }
 
 function renderContext(context) {
   currentContext = context;
   // Gerrit subject를 우선 표시; 이슈 조회가 성공하면 Jira 제목으로 대체된다.
   issueTitleEl.textContent = context.subject || '-';
+  changeLineEl.textContent = [context.changeNum, context.branch, context.submittedAt ? 'MERGED' : '']
+    .filter(Boolean).join(' · ') || '-';
   if (!issueKeyInputEl.value && context.issueKey) {
     issueKeyInputEl.value = context.issueKey;
   }
   syncActionButtons();
-  updateApplyEmphasis();
 }
 
-function isChangeMerged() {
-  return !!currentContext?.submittedAt;
-}
+const toState = (v) => (v === true ? 'has' : v === false ? 'fresh' : 'unknown');
 
-// 머지된 change인데 아직 코멘트가 안 달렸으면 반영 처리를 강조한다.
-function updateApplyEmphasis() {
-  const emphasize = isChangeMerged() && commentDuplicate !== true;
-  btnApply.classList.toggle('primary', emphasize);
-  btnApply.title = emphasize ? I18N.t('popup.title.applyMerged') : '';
-}
-
-function renderCommentState() {
-  if (commentDuplicate === true) {
-    issueCommentStateEl.textContent = I18N.t('popup.state.commentExists');
-    issueCommentStateEl.style.display = 'block';
-  } else {
-    issueCommentStateEl.style.display = 'none';
-  }
-  updateApplyEmphasis();
-}
-
-async function checkCommentState(issueKey) {
-  commentDuplicate = null;
-  renderCommentState();
+async function checkRecordState(issueKey) {
+  recordKey = issueKey;
   try {
     const resp = await sendMessage({ type: MSG.POPUP_CHECK_COMMENT, issueKeyOverride: issueKey });
-    if (resp?.ok) commentDuplicate = !!resp.duplicate;
+    // The key may have been edited while this was in flight.
+    if (recordKey !== issueKey) return;
+    if (resp?.ok) {
+      commentState = toState(resp.commented);
+      linkState = toState(resp.linked);
+    }
   } catch {
-    // Comment-state badge is optional UI; keep unknown on failure.
+    commentState = linkState = 'unknown';
   }
-  renderCommentState();
+  paintActions();
 }
 
 function normalizeIssueKey(key) {
@@ -176,8 +203,8 @@ function hideIssueCard() {
   issueTitleEl.textContent = currentContext?.subject || '-';
   issueAssigneeEl.textContent = '-';
   currentIssueStatus = '';
-  commentDuplicate = null;
-  renderCommentState();
+  commentState = linkState = 'unknown';
+  paintActions();
   resetTransitionUi();
 }
 
@@ -191,6 +218,7 @@ function resetTransitionUi() {
   issueStatusSelectEl.appendChild(current);
   issueStatusSelectEl.value = '';
   issueStatusSelectEl.disabled = true;
+  btnStatusChange.disabled = true;
 }
 
 function renderTransitions(transitions) {
@@ -216,7 +244,7 @@ async function loadTransitions(issueKey) {
       type: MSG.POPUP_GET_TRANSITIONS,
       issueKey,
     });
-    if (resp?.ok) renderTransitions(resp.transitions);
+    if (resp?.ok && getEffectiveIssueKey() === issueKey) renderTransitions(resp.transitions);
   } catch {
     // Transition list is optional UI; issue lookup already reported errors.
   }
@@ -227,9 +255,9 @@ function closeTransitionForm() {
   transitionFieldsEl.textContent = '';
 }
 
-// Picking a status: transitions without required fields run right away; the rest
+// "Change status": transitions without required fields run right away; the rest
 // open a small form, like the dialog Jira shows for Resolved.
-function onTransitionPicked() {
+function onStatusChangeClicked() {
   closeTransitionForm();
   const t = currentTransitions.find((x) => x.id === issueStatusSelectEl.value);
   if (!t) return;
@@ -247,6 +275,7 @@ function onTransitionPicked() {
       fields: blocking.map((f) => f.name).join(', '),
     }), 'warn');
     issueStatusSelectEl.value = '';
+    btnStatusChange.disabled = true;
     return;
   }
 
@@ -346,6 +375,7 @@ async function loadContext() {
       hideIssueCard();
       currentContext = null;
       issueTitleEl.textContent = '-';
+      changeLineEl.textContent = '-';
       syncActionButtons();
       setStatus(resp?.message || I18N.t('popup.status.noGerritPage'), 'warn');
       return false;
@@ -418,9 +448,10 @@ async function fetchIssue() {
       return;
     }
 
+    if (getEffectiveIssueKey() !== issueKey) return;
     renderIssueCard(resp.issue);
     setStatus(I18N.t('popup.status.fetchDone', { key: issueKey }), 'ok');
-    await Promise.all([loadTransitions(issueKey), checkCommentState(issueKey)]);
+    await Promise.all([loadTransitions(issueKey), checkRecordState(issueKey)]);
   } catch {
     setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
@@ -428,108 +459,98 @@ async function fetchIssue() {
   }
 }
 
-async function addRemoteLink() {
+// Checks shared by the two actions; returns the issue key or '' after telling why.
+function actionIssueKey(authKey) {
   if (!authConfigured) {
-    setStatus(I18N.t('popup.status.authMissingLink'), 'warn');
-    return;
+    setStatus(I18N.t(authKey), 'warn');
+    return '';
   }
   const issueKey = getEffectiveIssueKey();
-  if (!issueKey) {
-    setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
-    return;
-  }
+  if (!issueKey) setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
+  return issueKey;
+}
+
+async function addRemoteLink() {
+  // A web link of the same change is overwritten, so a second one changes nothing.
+  if (linkState === 'has' || linkState === 'busy') return;
+  const issueKey = actionIssueKey('popup.status.authMissingLink');
+  if (!issueKey) return;
 
   setActionBusy(true);
+  linkState = 'busy';
+  paintActions();
   setStatus(I18N.t('popup.status.addingLink'), '');
   try {
     const resp = await sendMessage({ type: MSG.POPUP_ADD_REMOTE_LINK, issueKeyOverride: issueKey });
     if (!resp?.ok) {
+      linkState = 'fresh';
       setStatus(resp?.message || I18N.t('popup.status.linkFailed'), 'err');
       return;
     }
+    linkState = 'has';
     setStatus(I18N.t('popup.status.linkDone', { key: issueKey }), 'ok');
   } catch {
+    linkState = 'fresh';
     setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
     setActionBusy(false);
   }
 }
 
-async function requestAddComment(issueKey) {
-  const resp = await sendMessage({ type: MSG.POPUP_ADD_COMMENT, issueKeyOverride: issueKey });
-  if (resp?.duplicate) {
-    const proceed = window.confirm(I18N.t('popup.confirm.duplicateComment', { key: resp.issueKey }));
-    if (!proceed) return { ok: false, cancelled: true };
-    return sendMessage({ type: MSG.POPUP_ADD_COMMENT, issueKeyOverride: issueKey, force: true });
+// After a comment on a merged change: preselect the status set in options, so
+// "Change status" is one click away. Nothing changes until it is clicked.
+function afterComment(issueKey, suggest) {
+  commentState = 'has';
+  // The preselected status shows in the dropdown above, so the message stays short.
+  const option = suggest && [...issueStatusSelectEl.options].find((o) => o.value === suggest.id);
+  if (option) issueStatusSelectEl.value = option.value;
+  setStatus(I18N.t('popup.status.commentDone', { key: issueKey }), 'ok');
+}
+
+// Posts once; if the service worker finds a comment already there, or cannot
+// check, asks in the popup and posts again with force.
+async function postComment(issueKey, force, commentText) {
+  const resp = await sendMessage({ type: MSG.POPUP_ADD_COMMENT, issueKeyOverride: issueKey, force, commentText });
+  if (resp?.duplicate || resp?.unknown) {
+    const text = resp.duplicate
+      ? I18N.t('popup.confirm.duplicateComment', { key: resp.issueKey })
+      : I18N.t('popup.confirm.unknownComment', { key: resp.issueKey });
+    if (!await askInline(text, I18N.t(resp.duplicate ? 'popup.btn.commentAgain' : 'popup.btn.commentAnyway'))) {
+      return { cancelled: true, duplicate: !!resp.duplicate };
+    }
+    return postComment(issueKey, true, commentText);
   }
   return resp;
 }
 
 async function addComment() {
-  if (!authConfigured) {
-    setStatus(I18N.t('popup.status.authMissingComment'), 'warn');
-    return;
-  }
-  const issueKey = getEffectiveIssueKey();
-  if (!issueKey) {
-    setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
-    return;
-  }
-
+  const issueKey = actionIssueKey('popup.status.authMissingComment');
+  if (!issueKey) return;
+  // Decided before the confirm and the lock, so a refresh in between cannot flip it.
+  const known = commentState;
   setActionBusy(true);
-  setStatus(I18N.t('popup.status.addingComment'), '');
   try {
-    const resp = await requestAddComment(issueKey);
+    if (known === 'has'
+      && !await askInline(I18N.t('popup.confirm.duplicateComment', { key: issueKey }), I18N.t('popup.btn.commentAgain'))) {
+      return;
+    }
+    commentState = 'busy';
+    paintActions();
+    setStatus(I18N.t('popup.status.addingComment'), '');
+    const resp = await postComment(issueKey, known === 'has');
     if (resp?.cancelled) {
+      commentState = resp.duplicate ? 'has' : known;
       setStatus(I18N.t('popup.status.commentCancelled'), 'warn');
       return;
     }
     if (!resp?.ok) {
+      commentState = known;
       setStatus(resp?.message || I18N.t('popup.status.commentFailed'), 'err');
       return;
     }
-    setStatus(I18N.t('popup.status.commentDone', { key: issueKey }), 'ok');
-    commentDuplicate = true;
-    renderCommentState();
+    afterComment(issueKey, resp.suggest);
   } catch {
-    setStatus(I18N.t('popup.status.requestError'), 'err');
-  } finally {
-    setActionBusy(false);
-  }
-}
-
-async function applyLinkAndComment() {
-  if (!authConfigured) {
-    setStatus(I18N.t('popup.status.authMissingApply'), 'warn');
-    return;
-  }
-  const issueKey = getEffectiveIssueKey();
-  if (!issueKey) {
-    setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
-    return;
-  }
-
-  setActionBusy(true);
-  setStatus(I18N.t('popup.status.applying'), '');
-  try {
-    let resp = await sendMessage({ type: MSG.POPUP_QUICK_APPLY, issueKeyOverride: issueKey });
-    if (resp?.duplicate) {
-      const proceed = window.confirm(I18N.t('popup.confirm.duplicateApply', { key: resp.issueKey }));
-      if (!proceed) {
-        setStatus(I18N.t('popup.status.applyCancelled'), 'warn');
-        return;
-      }
-      resp = await sendMessage({ type: MSG.POPUP_QUICK_APPLY, issueKeyOverride: issueKey, force: true });
-    }
-
-    if (!resp?.ok) {
-      setStatus(resp?.message || I18N.t('popup.status.applyFailed'), 'err');
-      return;
-    }
-    setStatus(resp.message || I18N.t('popup.status.applyDone', { key: issueKey }), resp.transitionFailed ? 'warn' : 'ok');
-    commentDuplicate = true;
-    renderCommentState();
-  } catch {
+    if (commentState === 'busy') commentState = known;
     setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
     setActionBusy(false);
@@ -539,21 +560,19 @@ async function applyLinkAndComment() {
 // -- Editable comment preview ---------------------------------------------------
 
 function closePreview() {
-  previewMode = null;
   previewPanelEl.style.display = 'none';
   btnRowEl.style.display = 'grid';
+  syncActionButtons();
 }
 
-async function openPreview(mode) {
-  if (!authConfigured) {
-    setStatus(I18N.t('popup.status.authMissing'), 'warn');
-    return;
-  }
-  const issueKey = getEffectiveIssueKey();
-  if (!issueKey) {
-    setStatus(I18N.t('popup.status.noIssueKey'), 'warn');
-    return;
-  }
+// The preview's key and whether it showed a duplicate / could-not-check warning.
+// Submitting a warned preview is the answer to that warning (force); otherwise the
+// duplicate check runs again at submit time.
+let preview = { key: '', warned: false };
+
+async function openPreview() {
+  const issueKey = actionIssueKey('popup.status.authMissing');
+  if (!issueKey) return;
 
   setActionBusy(true);
   setStatus(I18N.t('popup.status.buildingPreview'), '');
@@ -564,11 +583,10 @@ async function openPreview(mode) {
       return;
     }
 
-    previewMode = mode;
+    preview = { key: issueKey, warned: resp.duplicate !== false };
     previewTextEl.value = resp.text || '';
-    previewDupEl.textContent = resp.duplicate ? I18N.t('popup.preview.dup') : '';
-    previewTitleEl.textContent = I18N.t(mode === 'apply' ? 'popup.preview.titleApply' : 'popup.preview.title');
-    btnPreviewSubmit.textContent = I18N.t(mode === 'apply' ? 'popup.btn.previewSubmitApply' : 'popup.btn.previewSubmitComment');
+    previewDupEl.textContent = resp.duplicate === true ? I18N.t('popup.preview.dup')
+      : resp.duplicate == null ? I18N.t('popup.preview.unknown') : '';
     btnRowEl.style.display = 'none';
     previewPanelEl.style.display = 'block';
     setStatus(I18N.t('popup.status.previewHint'), '');
@@ -580,37 +598,31 @@ async function openPreview(mode) {
 }
 
 async function submitPreview() {
-  const issueKey = getEffectiveIssueKey();
+  const issueKey = preview.key;
   const commentText = previewTextEl.value.trim();
-  if (!previewMode || !issueKey) return;
+  if (!issueKey) return;
   if (!commentText) {
     setStatus(I18N.t('popup.status.emptyComment'), 'warn');
     return;
   }
 
-  const mode = previewMode;
   btnPreviewSubmit.disabled = true;
   btnPreviewCancel.disabled = true;
-  setStatus(I18N.t(mode === 'apply' ? 'popup.status.applying' : 'popup.status.submittingComment'), '');
+  setStatus(I18N.t('popup.status.submittingComment'), '');
   try {
-    const resp = await sendMessage({
-      type: mode === 'apply' ? MSG.POPUP_QUICK_APPLY : MSG.POPUP_ADD_COMMENT,
-      issueKeyOverride: issueKey,
-      commentText,
-      force: true,
-    });
+    const resp = await postComment(issueKey, preview.warned, commentText);
+    if (resp?.cancelled) {
+      setStatus(I18N.t('popup.status.commentCancelled'), 'warn');
+      return;
+    }
     if (!resp?.ok) {
       setStatus(resp?.message || I18N.t('popup.status.submitFailed'), 'err');
       return;
     }
     closePreview();
-    setStatus(
-      resp.message
-        || I18N.t(mode === 'apply' ? 'popup.status.applyDone' : 'popup.status.commentDone', { key: issueKey }),
-      resp.transitionFailed ? 'warn' : 'ok',
-    );
-    commentDuplicate = true;
-    renderCommentState();
+    afterComment(issueKey, resp.suggest);
+    paintActions();
+    btnStatusChange.disabled = !issueStatusSelectEl.value;
   } catch {
     setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
@@ -633,6 +645,54 @@ function openIssuePage() {
   chrome.tabs.create({ url });
   window.close();
 }
+
+// -- Popup size ---------------------------------------------------------------
+// Chrome sizes the popup to its content (at most 800 x 600), so dragging the grip
+// changes the body width and, on Jira, the list height. Kept per mode.
+
+const SIZE_LIMITS = { minW: 360, maxW: 800, minH: 200, maxH: 440 };
+const resizeGripEl = document.getElementById('resize-grip');
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function applyPopupSize(size) {
+  if (size?.w) document.body.style.width = `${clamp(size.w, SIZE_LIMITS.minW, SIZE_LIMITS.maxW)}px`;
+  if (jiraMode && size?.h) gerritListEl.style.maxHeight = `${clamp(size.h, SIZE_LIMITS.minH, SIZE_LIMITS.maxH)}px`;
+}
+
+async function restorePopupSize() {
+  const { popupSize } = await chrome.storage.local.get(['popupSize']);
+  applyPopupSize(popupSize?.[jiraMode ? 'jira' : 'gerrit']);
+}
+
+// The list height is its max-height (the CSS default until dragged), not the
+// rendered height, which is shorter when there are few changes.
+const listMaxHeight = () => parseFloat(gerritListEl.style.maxHeight || getComputedStyle(gerritListEl).maxHeight) || 460;
+
+resizeGripEl.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  resizeGripEl.setPointerCapture(e.pointerId);
+  // screenX/Y, not clientX/Y: the popup window itself moves while it grows.
+  const start = { x: e.screenX, y: e.screenY, w: document.body.offsetWidth, h: listMaxHeight() };
+  let movedY = false;
+  const onMove = (ev) => {
+    const dy = ev.screenY - start.y;
+    movedY = movedY || Math.abs(dy) > 3;
+    applyPopupSize({ w: start.w + ev.screenX - start.x, h: movedY ? start.h + dy : 0 });
+  };
+  const onEnd = async () => {
+    resizeGripEl.removeEventListener('pointermove', onMove);
+    resizeGripEl.removeEventListener('lostpointercapture', onEnd);
+    const { popupSize } = await chrome.storage.local.get(['popupSize']);
+    const mode = jiraMode ? 'jira' : 'gerrit';
+    const size = { ...popupSize?.[mode], w: document.body.offsetWidth };
+    if (jiraMode && movedY) size.h = listMaxHeight();
+    chrome.storage.local.set({ popupSize: { ...popupSize, [mode]: size } });
+  };
+  resizeGripEl.addEventListener('pointermove', onMove);
+  // Fires after pointerup too, and when capture is lost without one.
+  resizeGripEl.addEventListener('lostpointercapture', onEnd);
+});
 
 // -- Jira mode: Gerrit changes mentioning the issue --------------------------------
 
@@ -670,52 +730,34 @@ function appendGerritLink(href, text) {
 async function loadGerritChanges() {
   const key = getEffectiveIssueKey();
   gerritListEl.textContent = '';
-  document.getElementById('head-key').textContent = key ? ` · ${key}` : '';
+  document.getElementById('head-key').textContent = key;
   if (!key) {
     setStatus(I18N.t('popup.status.enterIssueKeyJira'), 'warn');
     return;
   }
   btnRefresh.disabled = true;
+  issueKeyInputEl.disabled = true;
   setStatus(I18N.t('gerrit.loading'), '');
   try {
     const resp = await sendMessage({ type: MSG.GET_GERRIT_CHANGES, issueKey: key });
+    if (getEffectiveIssueKey() !== key) return;
     if (!resp?.ok) {
       setStatus(resp?.message || I18N.t('popup.status.requestError'), 'err');
       return;
     }
-    if (resp.signedIn) setStatus(I18N.t('popup.status.gerritDone', { n: resp.changes.length }), 'ok');
-    else setStatus(I18N.t('gerrit.notSignedIn'), 'warn');
+    if (!resp.signedIn) setStatus(I18N.t('gerrit.notSignedIn'), 'warn');
+    else setStatus('', '');
     if (!resp.changes.length) {
       if (resp.signedIn) appendGerritNote(I18N.t('gerrit.empty'));
       if (resp.loginUrl) appendGerritLink(resp.loginUrl, I18N.t('gerrit.signIn'));
       return;
     }
-    for (const c of resp.changes) {
-      const item = document.createElement('a');
-      item.className = 'change-item';
-      item.href = c.url;
-      item.target = '_blank';
-      item.rel = 'noopener noreferrer';
-
-      const head = document.createElement('div');
-      head.className = 'subject';
-      const status = document.createElement('span');
-      status.className = `change-status ${c.status}`;
-      status.textContent = c.status;
-      head.append(status, `${c.number} · ${c.subject}`);
-
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = [`${c.project} / ${c.branch}`, c.owner, c.date].filter(Boolean).join(' · ');
-
-      item.append(head, meta);
-      gerritListEl.appendChild(item);
-    }
-    if (resp.more && resp.searchUrl) appendGerritLink(resp.searchUrl, I18N.t('gerrit.viewAll'));
+    self.ChangeList.render(gerritListEl, { issueKey: key, resp, send: sendMessage });
   } catch {
     setStatus(I18N.t('popup.status.requestError'), 'err');
   } finally {
     btnRefresh.disabled = false;
+    issueKeyInputEl.disabled = false;
   }
 }
 
@@ -746,13 +788,11 @@ btnRefresh.addEventListener('click', async () => {
   setActionBusy(false);
 });
 
-btnApply.addEventListener('click', () => {
-  if (previewEnabled) openPreview('apply');
-  else applyLinkAndComment();
-});
 btnLink.addEventListener('click', addRemoteLink);
 btnComment.addEventListener('click', () => {
-  if (previewEnabled) openPreview('comment');
+  // A second click while the confirm is open would leave the first one unanswered.
+  if (commentState === 'busy' || confirmEl.classList.contains('open')) return;
+  if (previewEnabled) openPreview();
   else addComment();
 });
 btnPreviewSubmit.addEventListener('click', submitPreview);
@@ -780,7 +820,12 @@ btnOptions.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
 btnOpenIssue.addEventListener('click', openIssuePage);
-issueStatusSelectEl.addEventListener('change', onTransitionPicked);
+// Picking a status only arms the button; nothing changes until it is clicked.
+issueStatusSelectEl.addEventListener('change', () => {
+  closeTransitionForm();
+  btnStatusChange.disabled = !issueStatusSelectEl.value || btnRefresh.disabled;
+});
+btnStatusChange.addEventListener('click', onStatusChangeClicked);
 btnTransitionSubmit.addEventListener('click', submitTransitionForm);
 btnTransitionCancel.addEventListener('click', () => {
   closeTransitionForm();
@@ -792,13 +837,17 @@ btnTransitionCancel.addEventListener('click', () => {
 
 I18N.init(async () => {
   I18N.applyDom();
+  const style = document.createElement('style');
+  style.textContent = self.ChangeList.CSS;
+  document.head.appendChild(style);
   currentContext = null;
   authConfigured = true;
   syncActionButtons();
   await loadAuthState();
   const jiraTab = await getJiraTab();
   jiraMode = jiraTab.onJira;
-  await loadFabSetting();
+  if (jiraMode) document.body.classList.add('jira-mode');
+  await Promise.all([loadFabSetting(), restorePopupSize()]);
   if (jiraTab.onJira) {
     await initJiraMode(jiraTab.key);
     return;
