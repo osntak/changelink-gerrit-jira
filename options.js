@@ -28,13 +28,13 @@ const optPreviewEl        = /** @type {HTMLInputElement} */ (document.getElement
 const optTransitionNameEl = /** @type {HTMLSelectElement} */ (document.getElementById('opt-transition-name'));
 const optResolutionEl     = /** @type {HTMLSelectElement} */ (document.getElementById('opt-resolution'));
 const uiLanguageEl        = /** @type {HTMLSelectElement} */ (document.getElementById('ui-language'));
+const uiThemeEl           = /** @type {HTMLSelectElement} */ (document.getElementById('ui-theme'));
 
 const FAB_ACTION_INPUTS = {
   openIssue: /** @type {HTMLInputElement} */ (document.getElementById('fab-open-issue')),
   lookup:    /** @type {HTMLInputElement} */ (document.getElementById('fab-lookup')),
   link:      /** @type {HTMLInputElement} */ (document.getElementById('fab-link')),
   comment:   /** @type {HTMLInputElement} */ (document.getElementById('fab-comment')),
-  apply:     /** @type {HTMLInputElement} */ (document.getElementById('fab-apply')),
   options:   /** @type {HTMLInputElement} */ (document.getElementById('fab-options')),
 };
 
@@ -76,14 +76,14 @@ I18N.init(() => {
       'jiraEmail', 'jiraToken', 'gerritUser', 'gerritPassword', 'commentTemplate',
       'previewEnabled',
       'applyTransitionEnabled', 'applyTransitionName', 'applyResolution', 'fabActions',
-      'uiLanguage',
+      'uiLanguage', 'uiTheme',
     ],
     ({
       gerritOrigin, jiraBase,
       jiraEmail, jiraToken, gerritUser, gerritPassword, commentTemplate,
       previewEnabled,
       applyTransitionEnabled, applyTransitionName, applyResolution, fabActions,
-      uiLanguage,
+      uiLanguage, uiTheme,
     }) => {
       if (gerritOrigin) gerritUrlEl.value = gerritOrigin;
       if (jiraBase) jiraUrlEl.value = jiraBase;
@@ -95,6 +95,7 @@ I18N.init(() => {
       templateEl.value = commentTemplate ?? DEFAULT_TEMPLATE;
 
       uiLanguageEl.value = uiLanguage || 'auto';
+      uiThemeEl.value = uiTheme || 'auto';
 
       optPreviewEl.checked = previewEnabled !== false;
 
@@ -115,6 +116,12 @@ I18N.init(() => {
       }
     },
   );
+});
+
+// The theme is saved as soon as it is picked: this page, the popup and the FAB on
+// open Gerrit / Jira tabs all follow it (theme.js watches the stored value).
+uiThemeEl.addEventListener('change', () => {
+  chrome.storage.local.set({ uiTheme: uiThemeEl.value });
 });
 
 // Switching the combo repaints the page right away, before the save button is

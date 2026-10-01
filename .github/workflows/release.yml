@@ -56,6 +56,8 @@ jobs:
             icons \
             i18n.js \
             message_types.js \
+            theme.js \
+            change_list.js \
             content_script.js \
             service_worker.js \
             popup.html \
