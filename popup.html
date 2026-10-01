@@ -4,17 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Changelink</title>
+  <script src="theme.js" data-page></script>
   <style>
+    /* One column: issue card, then the Gerrit actions; on a Jira issue the card is
+       replaced by the change list. */
+    /* Colors come from theme.js (light / dark / follow the browser). */
     :root {
-      --bg: #f7f9fc;
-      --card: #ffffff;
-      --line: #dde3ee;
-      --ink: #1e2530;
-      --sub: #526074;
-      --pri: #1565c0;
-      --ok: #2e7d32;
-      --err: #c62828;
-      --warn: #e65100;
+      --f-body: "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", system-ui, sans-serif;
+      --f-mono: "SF Mono", Menlo, Consolas, monospace;
     }
 
     * { box-sizing: border-box; }
@@ -24,378 +21,287 @@
       width: 360px;
       background: var(--bg);
       color: var(--ink);
-      font: 13px/1.45 'Segoe UI', system-ui, sans-serif;
+      font: 13px/1.5 var(--f-body);
     }
 
-    .wrap {
-      padding: 12px;
-      display: grid;
-      gap: 10px;
-    }
+    .wrap { padding: 10px; display: grid; gap: 8px; }
 
     .panel {
-      background: var(--card);
+      background: var(--surface);
       border: 1px solid var(--line);
       border-radius: 10px;
-      padding: 12px;
+      overflow: hidden;
     }
-
-    h1 {
-      margin: 0;
-      font-size: 14px;
-      color: var(--pri);
-    }
+    .panel-body { padding: 12px; display: grid; gap: 10px; }
 
     .head-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      padding: 9px 12px;
+      background: var(--accent-soft);
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--ink); }
+    .head-key { color: var(--accent); font-family: var(--f-mono); font-size: 12px; font-weight: 600; }
+    .head-actions { display: flex; gap: 4px; }
+
+    button {
+      font: inherit;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: 7px;
+      padding: 7px 10px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.primary { background: var(--fill); border-color: var(--fill); color: var(--fill-ink); }
+    button:disabled { cursor: not-allowed; color: var(--mute); background: var(--soft); border-color: var(--line); }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, .cl-ico:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
 
     .icon-btn {
       width: 28px;
       height: 28px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
-      color: var(--sub);
-      font-size: 15px;
-      line-height: 1;
-      cursor: pointer;
-      padding: 0;
-    }
-
-    .issue-title {
-      margin-top: 10px;
-      font-size: 13px;
-      font-weight: 700;
-      word-break: break-word;
-    }
-
-    .info-grid {
-      margin-top: 8px;
-      display: grid;
-      grid-template-columns: 62px 1fr;
-      gap: 6px 8px;
-      align-items: center;
-      font-size: 12px;
-      color: var(--sub);
-    }
-
-    .info-grid input {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 6px 9px;
-      font-size: 12px;
-      color: var(--ink);
-      background: #fff;
-    }
-
-    .info-grid select {
-      width: 100%;
-      min-width: 0;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      padding: 6px 8px;
-      font-size: 12px;
-      color: var(--ink);
-      background: #fff;
-    }
-
-    .info-grid select:disabled {
-      border-color: transparent;
-      background: transparent;
-      opacity: 1;
-      appearance: none;
-      padding-left: 0;
-      color: var(--ink);
-      font-weight: 600;
-    }
-
-    .field-inline {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-
-    .field-inline input {
-      flex: 1;
-    }
-
-    .value {
-      color: var(--ink);
-      font-weight: 600;
-      word-break: break-word;
-    }
-
-    .arrow-btn {
-      width: 34px;
-      height: 34px;
-      border-radius: 8px;
       padding: 0;
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      border-color: transparent;
+      background: transparent;
+      color: var(--sub);
     }
+    .icon-btn:hover:not(:disabled) { background: var(--surface); border-color: var(--line); color: var(--ink); }
+    .icon-svg { width: 16px; height: 16px; display: block; }
 
-    .icon-svg {
-      width: 16px;
-      height: 16px;
-      display: block;
-    }
+    .issue-title { font-size: 13.5px; font-weight: 700; word-break: break-word; }
 
-    .head-actions {
-      display: flex;
-      gap: 6px;
-    }
-
-    .btn-row {
+    .info-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-      margin-top: 8px;
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 6px 10px;
+      align-items: center;
     }
+    .info-grid > span { color: var(--sub); font-size: 12px; }
 
-    .btn-row .span2 {
-      grid-column: 1 / -1;
+    input, select, textarea {
+      font: inherit;
+      color: var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 7px;
     }
-
-    .comment-state {
-      display: none;
-      margin-top: 6px;
-      font-size: 11.5px;
+    .info-grid input { width: 100%; padding: 5px 9px; font-family: var(--f-mono); font-size: 12px; }
+    .info-grid select { width: 100%; min-width: 0; padding: 5px 8px; font-size: 12.5px; }
+    /* No transitions to offer: the select just shows the current status. */
+    .info-grid select:disabled {
+      border-color: transparent;
+      background: transparent;
+      appearance: none;
+      padding-left: 0;
       font-weight: 600;
-      color: var(--ok);
+      color: var(--ink);
     }
 
-    .preview-panel {
-      display: none;
-      margin-top: 8px;
-    }
+    .field-inline { display: flex; gap: 6px; align-items: center; min-width: 0; }
+    .field-inline input, .field-inline select { flex: 1; }
+    .field-inline button { flex: none; padding: 5px 9px; }
+    .arrow-btn { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+    .value { font-weight: 600; word-break: break-word; }
+    .change-line { font-family: var(--f-mono); font-size: 11.5px; color: var(--sub); word-break: break-all; }
 
     /* Required fields of a transition screen (e.g. resolution for Resolved). */
     .transition-form {
       display: none;
-      margin-top: 8px;
-      padding: 8px 10px 10px;
+      padding: 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #f9fbfe;
+      background: var(--soft);
     }
 
-    .transition-form .info-grid {
-      margin-top: 0;
-    }
+    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .pair .cl-ico { width: 100%; }
 
+    .preview-panel { display: none; }
     .preview-head {
       font-size: 12px;
       font-weight: 700;
-      color: var(--ink);
-      margin-bottom: 5px;
+      margin-bottom: 6px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
     }
-
-    .dup-warn {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--warn);
-    }
-
+    .dup-warn { font-size: 11px; font-weight: 700; color: var(--warn); }
     .preview-panel textarea {
       width: 100%;
       min-height: 170px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
       padding: 8px 9px;
-      font: 11.5px/1.5 'Consolas', 'Menlo', monospace;
-      color: var(--ink);
-      background: #fff;
+      font: 11.5px/1.5 var(--f-mono);
       resize: vertical;
     }
+    .preview-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
 
-    .preview-actions {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
-      margin-top: 6px;
+    /* Messages: status line, plus the inline confirm with its buttons. */
+    .status {
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      background: var(--accent-soft);
+      color: var(--ink);
+      white-space: pre-line;
     }
+    .status:empty { display: none; }
+    .status.ok { background: var(--ok-soft); color: var(--ok); }
+    .status.err { background: var(--err-soft); color: var(--err); }
+    .status.warn { background: var(--warn-soft); color: var(--warn); }
+    .confirm { display: none; gap: 6px; }
+    .confirm.open { display: grid; }
+    .confirm .acts { display: flex; gap: 6px; }
+    .confirm button { padding: 4px 10px; font-size: 12px; }
 
     .toggle-row {
-      margin-top: 8px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
+      padding: 9px 12px;
       font-size: 12px;
       color: var(--sub);
+      border-top: 1px solid var(--line);
     }
-
-    .switch {
-      position: relative;
-      width: 44px;
-      height: 24px;
-      display: inline-block;
-    }
-
-    .switch input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-
-    .slider {
-      position: absolute;
-      inset: 0;
-      border-radius: 999px;
-      background: #c7d1e2;
-      transition: background 0.2s ease;
-      cursor: pointer;
-    }
-
+    .switch { position: relative; width: 36px; height: 20px; display: inline-block; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background 0.2s ease; cursor: pointer; }
     .slider::before {
       content: '';
       position: absolute;
-      width: 18px;
-      height: 18px;
+      width: 14px;
+      height: 14px;
       left: 3px;
       top: 3px;
       border-radius: 50%;
       background: #fff;
       transition: transform 0.2s ease;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
     }
+    .switch input:checked + .slider { background: var(--fill); }
+    .switch input:checked + .slider::before { transform: translateX(16px); }
+    .switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-    .switch input:checked + .slider {
-      background: var(--pri);
-    }
-
-    .switch input:checked + .slider::before {
-      transform: translateX(20px);
-    }
-
-    button {
-      border: 1px solid var(--line);
-      background: #fff;
-      color: var(--ink);
-      border-radius: 8px;
-      padding: 8px 10px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    button.primary {
-      background: var(--pri);
-      color: #fff;
-      border-color: var(--pri);
-    }
-
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .status {
-      min-height: 20px;
-      border-radius: 8px;
-      padding: 8px 10px;
-      font-size: 12px;
-      background: #ecf2fb;
-      color: var(--pri);
-      white-space: pre-line;
-    }
-
-    /* Opened on a Jira issue: only the header, the Gerrit change list and the FAB toggle. */
+    /* Jira mode: only the header, the change list and the FAB toggle. */
     .change-list { display: none; }
-    body.jira-mode { width: 520px; }
-    .head-key { color: var(--sub); font-weight: 600; }
-    .login-link { justify-self: start; color: var(--pri); font-weight: 600; font-size: 12px; }
+    body.jira-mode { width: 640px; }
     body.jira-mode .issue-title,
     body.jira-mode .info-grid,
-    body.jira-mode .comment-state,
-    body.jira-mode .btn-row,
+    body.jira-mode .pair,
     body.jira-mode .preview-panel { display: none; }
-    body.jira-mode .change-list { margin-top: 8px; display: grid; gap: 2px; max-height: 420px; overflow: auto; }
+    body.jira-mode .panel-body { padding: 0; gap: 0; }
+    body.jira-mode .change-list { display: block; max-height: 460px; overflow: auto; }
+    body.jira-mode .status { margin: 10px 12px; }
     /* Jira page that is not an issue: keep only the issue key row to type one. */
+    body.jira-mode.jira-nokey .panel-body { padding: 12px; }
     body.jira-mode.jira-nokey .info-grid { display: grid; }
     body.jira-mode.jira-nokey .info-grid > :nth-child(n+3) { display: none; }
-    .change-item { display: block; padding: 6px 8px; border-radius: 7px; color: var(--ink); text-decoration: none; }
-    .change-item:hover { background: #f4f8ff; }
-    .change-item .subject { font-weight: 600; word-break: break-word; }
-    .change-item .meta { color: var(--sub); font-size: 11.5px; }
-    .change-status { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 4px; font-size: 10.5px; font-weight: 700; color: #fff; background: #8a94a6; }
-    .change-status.NEW { background: var(--pri); }
-    .change-status.MERGED { background: var(--ok); }
-    .change-status.WIP { background: #b26a00; }
-    .change-empty { margin-top: 8px; color: var(--sub); font-size: 12px; white-space: pre-line; }
+    .change-empty { padding: 12px; color: var(--sub); font-size: 12px; white-space: pre-line; }
+    .login-link { display: inline-block; margin: 0 12px 12px; color: var(--accent); font-weight: 600; font-size: 12px; }
 
-    .status.ok { background: #e8f5e9; color: var(--ok); }
-    .status.err { background: #ffebee; color: var(--err); }
-    .status.warn { background: #fff3e0; color: var(--warn); }
+    /* Corner grip: drag to resize the popup (width, plus the list height on Jira). */
+    .resize-grip {
+      position: fixed;
+      right: 0;
+      bottom: 0;
+      width: 16px;
+      height: 16px;
+      cursor: ew-resize;
+      touch-action: none;
+      background: linear-gradient(135deg, transparent 0 55%, var(--mute) 55% 62%, transparent 62% 74%, var(--mute) 74% 81%, transparent 81%);
+    }
+    body.jira-mode .resize-grip { cursor: nwse-resize; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .slider, .slider::before { transition: none; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <section class="panel">
       <div class="head-row">
-        <h1>Changelink<span id="head-key" class="head-key"></span></h1>
+        <h1>Changelink <span id="head-key" class="head-key"></span></h1>
         <div class="head-actions">
-          <button id="btn-refresh" class="icon-btn" data-i18n-title="popup.btn.refresh" data-i18n-label="popup.btn.refresh">↻</button>
-          <button id="btn-options" class="icon-btn" data-i18n-title="popup.btn.options" data-i18n-label="popup.btn.options">⚙</button>
-        </div>
-      </div>
-      <div id="issue-title" class="issue-title">-</div>
-
-      <div class="info-grid">
-        <span data-i18n="popup.label.issue">Issue</span>
-        <div class="field-inline">
-          <input id="issue-key-input" type="text" placeholder="PROJ-123">
-          <button id="btn-open-issue" class="arrow-btn" data-i18n-title="popup.btn.openIssue" data-i18n-label="popup.btn.openIssue">
-            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M14 3h7v7"></path>
-              <path d="M10 14 21 3"></path>
-              <path d="M21 14v7h-7"></path>
-              <path d="M3 10v11h11"></path>
-            </svg>
+          <button id="btn-refresh" class="icon-btn" type="button" data-i18n-title="popup.btn.refresh" data-i18n-label="popup.btn.refresh">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+          </button>
+          <button id="btn-options" class="icon-btn" type="button" data-i18n-title="popup.btn.options" data-i18n-label="popup.btn.options">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
           </button>
         </div>
-        <span data-i18n="popup.label.status">Status</span>
-        <select id="issue-status-select" data-i18n-label="popup.label.statusChange" disabled>
-          <option value="">-</option>
-        </select>
-        <span data-i18n="popup.label.assignee">Assignee</span>
-        <div id="issue-assignee" class="value">-</div>
-      </div>
-      <div id="transition-form" class="transition-form">
-        <div id="transition-fields" class="info-grid"></div>
-        <div class="preview-actions">
-          <button id="btn-transition-submit" class="primary" data-i18n="popup.btn.transitionSubmit">상태 변경</button>
-          <button id="btn-transition-cancel" data-i18n="popup.btn.previewCancel">취소</button>
-        </div>
-      </div>
-      <div id="issue-comment-state" class="comment-state"></div>
-      <div id="gerrit-list" class="change-list"></div>
-
-      <div id="btn-row" class="btn-row">
-        <button id="btn-apply" class="span2" data-i18n="popup.btn.apply">⚡ 반영 처리</button>
-        <button id="btn-link" data-i18n="popup.btn.link">웹링크 추가</button>
-        <button id="btn-comment" data-i18n="popup.btn.comment">코멘트 생성</button>
       </div>
 
-      <div id="preview-panel" class="preview-panel">
-        <div class="preview-head">
-          <span id="preview-title" data-i18n="popup.preview.title">코멘트 미리보기</span>
-          <span id="preview-dup" class="dup-warn"></span>
+      <div class="panel-body">
+        <div id="issue-title" class="issue-title">-</div>
+
+        <div class="info-grid">
+          <span data-i18n="popup.label.issue">Issue</span>
+          <div class="field-inline">
+            <input id="issue-key-input" type="text" placeholder="PROJ-123" autocomplete="off" spellcheck="false">
+            <button id="btn-open-issue" class="arrow-btn" type="button" data-i18n-title="popup.btn.openIssue" data-i18n-label="popup.btn.openIssue">
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v7h-7"/><path d="M3 10v11h11"/></svg>
+            </button>
+          </div>
+          <span data-i18n="popup.label.status">Status</span>
+          <div class="field-inline">
+            <select id="issue-status-select" data-i18n-label="popup.label.statusChange" disabled>
+              <option value="">-</option>
+            </select>
+            <button id="btn-status-change" type="button" data-i18n="popup.btn.transitionSubmit" disabled>상태 변경</button>
+          </div>
+          <span data-i18n="popup.label.assignee">Assignee</span>
+          <div id="issue-assignee" class="value">-</div>
+          <span>change</span>
+          <div id="change-line" class="change-line">-</div>
         </div>
-        <textarea id="preview-text" spellcheck="false"></textarea>
-        <div class="preview-actions">
-          <button id="btn-preview-submit" class="primary" data-i18n="popup.btn.previewSubmit">등록</button>
-          <button id="btn-preview-cancel" data-i18n="popup.btn.previewCancel">취소</button>
+
+        <div id="transition-form" class="transition-form">
+          <div id="transition-fields" class="info-grid"></div>
+          <div class="preview-actions">
+            <button id="btn-transition-submit" class="primary" type="button" data-i18n="popup.btn.transitionSubmit">상태 변경</button>
+            <button id="btn-transition-cancel" type="button" data-i18n="popup.btn.previewCancel">취소</button>
+          </div>
+        </div>
+
+        <div id="status" class="status" data-i18n="popup.status.initializing">초기화 중...</div>
+        <div id="confirm" class="status warn confirm" role="alertdialog">
+          <span id="confirm-text"></span>
+          <div class="acts">
+            <button id="btn-confirm-yes" class="primary" type="button"></button>
+            <button id="btn-confirm-no" type="button" data-i18n="popup.btn.previewCancel">취소</button>
+          </div>
+        </div>
+
+        <div id="gerrit-list" class="change-list"></div>
+
+        <div id="btn-row" class="pair cl">
+          <button id="btn-comment" type="button"></button>
+          <button id="btn-link" type="button"></button>
+        </div>
+
+        <div id="preview-panel" class="preview-panel">
+          <div class="preview-head">
+            <span id="preview-title" data-i18n="popup.preview.title">코멘트 미리보기</span>
+            <span id="preview-dup" class="dup-warn"></span>
+          </div>
+          <textarea id="preview-text" spellcheck="false"></textarea>
+          <div class="preview-actions">
+            <button id="btn-preview-submit" class="primary" type="button" data-i18n="popup.btn.previewSubmitComment">코멘트 등록</button>
+            <button id="btn-preview-cancel" type="button" data-i18n="popup.btn.previewCancel">취소</button>
+          </div>
         </div>
       </div>
 
@@ -406,14 +312,14 @@
           <span class="slider"></span>
         </label>
       </div>
-
     </section>
-
-    <div id="status" class="status" data-i18n="popup.status.initializing">초기화 중...</div>
   </div>
+
+  <div id="resize-grip" class="resize-grip" data-i18n-title="popup.resize" aria-hidden="true"></div>
 
   <script src="i18n.js"></script>
   <script src="message_types.js"></script>
+  <script src="change_list.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

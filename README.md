@@ -27,10 +27,11 @@ directly from the extension. There is no server in between, and no account to si
 - Finds the Jira issue key in the change subject or commit message, and shows the issue status right on the page
 - Adds the Gerrit change as a Jira remote link
 - Posts a comment built from your own template, with a preview you can edit before it goes out
-- Moves the issue to another status
-- Does all of the above in one click, skipping the comment if the same one is already there
+- Moves the issue to another status. After a comment on a merged change it picks the status you set, but only moves when you click
 - Puts a draggable quick action button on the change page, with the buttons you pick
-- On a Jira issue, lists the Gerrit changes whose commit message mentions it, from the popup or the quick action button
+- Light and dark themes, following the browser by default or fixed in the options. Drag the popup's bottom-right corner to resize it
+- On a Jira issue, lists the Gerrit changes whose commit message mentions it, from the popup or the quick action button.
+  Each merged change shows whether its comment and web link are already there, and the missing ones can be posted in one go
 
 <p align="center">
   <img src="store-assets/screenshot-jira-browser.png" width="820" alt="Related Gerrit changes in the popup on a Jira issue page">
@@ -67,12 +68,16 @@ permissions for the URLs you just typed, and it has to be allowed for anything t
 The connection test checks the credentials against `/rest/api/3/myself` and reports the
 HTTP status, so a wrong token says 401 instead of failing silently later.
 
-The Gerrit username and HTTP password are only used to find related changes from a Jira
-issue. Leave them empty and the browser's Gerrit login session is used instead. When they
+The Gerrit username and HTTP password are only used when the Jira side reads Gerrit: the
+related change search, the account lookup that tells your changes apart, and the change
+details read when commenting from the list. Leave them empty and the browser's Gerrit login
+session is used instead. When they
 are filled in, the connection test checks them too, against `/a/accounts/self`.
 
-When Apply moves an issue to a status that sets a resolution (such as Resolved), you can
-pick which one (such as Fixed) with "Resolution for the transition" in the options. Jira's
+With "Status to offer after a comment" set in the options, a comment on a merged change
+makes the popup pick that status for you, and the quick action button shows a button to move
+there. For a status that sets a resolution (such as Resolved), you can pick which one (such
+as Fixed) with "Resolution for the transition". Jira's
 default, usually Done, is preselected. If the issue has other required fields
 left empty (such as fix version), the status is left unchanged and you are told why.
 

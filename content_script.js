@@ -12,7 +12,7 @@ const MSG = self.MESSAGE_TYPES;
 const FAB_ROOT_ID = 'gj-fab-root';
 const ISSUE_DIALOG_ID = '__gj_issue_dialog__';
 const STATUS_PILL_ID = 'gj-fab-status-pill';
-const FAB_SCHEMA_VERSION = '6';
+const FAB_SCHEMA_VERSION = '7';
 const FAB_POSITION_KEY = 'fabPosition';
 
 const DEFAULT_FAB_ACTIONS = {
@@ -20,7 +20,6 @@ const DEFAULT_FAB_ACTIONS = {
   lookup: true,
   link: true,
   comment: true,
-  apply: true,
   options: true,
 };
 
@@ -79,7 +78,6 @@ function queryShadowAll(root, selector) {
 // -- Extraction helpers -------------------------------------------------------
 
 const ISSUE_KEY_RE = /\b([A-Z][A-Z0-9]+-\d+)\b/i;
-const JIRA_TAG_RE = /jira\s*:\s*([A-Z][A-Z0-9]+-\d+)/i;
 const CHANGE_ID_RE = /\bChange-Id\s*:\s*(I[a-f0-9]{40})\b/i;
 const JIRA_BROWSE_RE = /\/browse\/([A-Z][A-Z0-9]+-\d+)\b/i;
 
@@ -193,22 +191,11 @@ function deriveContextFromPayload(payload) {
   const changeIdMatch = commitMessage.match(/\bChange-Id\s*:\s*(I[a-f0-9]{40})\b/i);
   const changeId = payloadChangeId || (changeIdMatch ? changeIdMatch[1] : '');
 
-  const body = commitMessage
-    ? commitMessage
-      .split('\n')
-      .slice(1)
-      .filter((line) => !/^\s*jira\s*:/i.test(line))
-      .filter((line) => !/^\s*change-id\s*:/i.test(line))
-      .filter((line) => !/^\s*cherry[- ]picked\s+from\b/i.test(line))
-      .filter((line) => !/^\s*cherry[- ]picked[- ]from\s*:/i.test(line))
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim()
-    : '';
+  const body = self.commitBodyFromMessage(commitMessage);
 
   const issueKey =
-    extractIssueKeyFromCommitPreferred(commitMessage) ||
-    extractIssueKeyFromText(subject) ||
+    self.mainIssueKey(commitMessage, true) ||
+    self.mainIssueKey(subject, true) ||
     null;
 
   return {
@@ -222,30 +209,6 @@ function deriveContextFromPayload(payload) {
     changeId,
     submittedAt,
   };
-}
-
-function extractIssueKeyFromText(text) {
-  if (!text) return null;
-
-  const jiraTag = text.match(JIRA_TAG_RE);
-  if (jiraTag) return normalizeIssueKey(jiraTag[1]);
-
-  const bare = text.match(ISSUE_KEY_RE);
-  if (bare) return normalizeIssueKey(bare[1]);
-
-  return null;
-}
-
-function extractIssueKeyFromCommitPreferred(commitText) {
-  if (!commitText) return null;
-
-  const tagMatch = commitText.match(JIRA_TAG_RE);
-  if (tagMatch) return normalizeIssueKey(tagMatch[1]);
-
-  const bareMatch = commitText.match(ISSUE_KEY_RE);
-  if (bareMatch) return normalizeIssueKey(bareMatch[1]);
-
-  return null;
 }
 
 function extractSubject() {
@@ -299,7 +262,7 @@ function getCommitMessageText() {
 function extractIssueKey() {
   // 1) commit message first (JIRA: KEY is most reliable)
   const commitText = getCommitMessageText();
-  const fromCommit = extractIssueKeyFromCommitPreferred(commitText);
+  const fromCommit = self.mainIssueKey(commitText, true);
   if (fromCommit) return fromCommit;
 
   // 2) Gerrit detail payload cache
@@ -321,7 +284,7 @@ function extractIssueKey() {
 
   // 4) content-first fallback
   const pageText = (document.body?.innerText || '').slice(0, 60000);
-  const fromBody = extractIssueKeyFromText(pageText);
+  const fromBody = self.mainIssueKey(pageText, true);
   if (fromBody) return fromBody;
 
   // 5) fallback: gather text inside open shadow roots explicitly
@@ -333,7 +296,7 @@ function extractIssueKey() {
     }
   }
   if (shadowTextChunks.length > 0) {
-    const fromShadowText = extractIssueKeyFromText(shadowTextChunks.join('\n'));
+    const fromShadowText = self.mainIssueKey(shadowTextChunks.join('\n'), true);
     if (fromShadowText) return fromShadowText;
   }
 
@@ -358,17 +321,17 @@ function extractIssueKey() {
     const els = queryShadowAll(document, sel);
     for (const el of els) {
       const text = (el.textContent || '').trim();
-      const key = extractIssueKeyFromText(text);
+      const key = self.mainIssueKey(text, true);
       if (key) return key;
     }
   }
 
   // 7) last resort: subject/title fallback
   const subject = extractSubject();
-  const fromSubject = extractIssueKeyFromText(subject);
+  const fromSubject = self.mainIssueKey(subject, true);
   if (fromSubject) return fromSubject;
 
-  const fromTitle = extractIssueKeyFromText(document.title);
+  const fromTitle = self.mainIssueKey(document.title, true);
   if (fromTitle) return fromTitle;
 
   return null;
@@ -568,12 +531,24 @@ function extractContextWithRetry(timeoutMs = 1800) {
 
 // -- Toast notification --------------------------------------------------------
 
+// Theme variables (theme.js) for the edge of each toast kind.
 const TOAST_COLORS = {
-  success: '#2e7d32',
-  error: '#c62828',
-  warn: '#e65100',
-  info: '#1565c0',
+  success: 'var(--ok)',
+  error: 'var(--err)',
+  warn: 'var(--warn)',
+  info: 'var(--accent)',
 };
+
+// Everything this script draws on the page takes the theme from its own root
+// element, so the host page's colors never leak in. Re-run when the theme changes.
+const THEMED_IDS = [FAB_ROOT_ID, ISSUE_DIALOG_ID, '__gj_changes_dialog__', '__gjc_toast__'];
+function applyThemeToAll() {
+  for (const id of THEMED_IDS) {
+    const el = document.getElementById(id);
+    if (el) self.Theme.applyVars(el);
+  }
+}
+self.Theme.watch(applyThemeToAll);
 
 function showToast(message, type = 'info', action) {
   const existing = document.getElementById('__gjc_toast__');
@@ -589,14 +564,16 @@ function showToast(message, type = 'info', action) {
     top: '20px',
     right: '20px',
     zIndex: '2147483647',
-    background: TOAST_COLORS[type] ?? TOAST_COLORS.info,
-    color: '#fff',
-    padding: '12px 20px',
-    borderRadius: '6px',
-    fontSize: '14px',
+    background: 'var(--surface)',
+    color: 'var(--ink)',
+    border: '1px solid var(--line)',
+    borderLeft: `4px solid ${TOAST_COLORS[type] ?? TOAST_COLORS.info}`,
+    padding: '11px 16px',
+    borderRadius: '8px',
+    fontSize: '13.5px',
     fontFamily: 'system-ui, -apple-system, sans-serif',
     maxWidth: '440px',
-    boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
+    boxShadow: '0 8px 22px var(--shade)',
     lineHeight: '1.5',
     wordBreak: 'break-word',
     opacity: '1',
@@ -613,10 +590,10 @@ function showToast(message, type = 'info', action) {
     actionBtn.textContent = action.label;
     Object.assign(actionBtn.style, {
       marginLeft: '12px',
-      border: '1px solid rgba(255,255,255,0.65)',
-      background: 'transparent',
-      color: '#fff',
-      borderRadius: '5px',
+      border: '1px solid var(--line)',
+      background: 'var(--soft)',
+      color: 'var(--accent)',
+      borderRadius: '6px',
       padding: '3px 10px',
       fontSize: '12px',
       fontWeight: '700',
@@ -633,6 +610,7 @@ function showToast(message, type = 'info', action) {
     toast.style.pointerEvents = 'auto';
   }
 
+  self.Theme.applyVars(toast);
   document.body.appendChild(toast);
 
   const lifetime = action ? 8000 : 4500;
@@ -718,7 +696,7 @@ function closeFabMenu() {
   const mainButton = document.getElementById('gj-fab-main');
   if (mainButton) {
     mainButton.style.transform = 'translateY(0) scale(1)';
-    mainButton.style.boxShadow = '0 6px 18px rgba(0,0,0,0.35)';
+    mainButton.style.boxShadow = '0 6px 18px var(--shade)';
   }
 }
 
@@ -733,7 +711,7 @@ function openFabMenu() {
   const mainButton = document.getElementById('gj-fab-main');
   if (mainButton) {
     mainButton.style.transform = 'translateY(-1px) scale(1.03)';
-    mainButton.style.boxShadow = '0 10px 24px rgba(0,0,0,0.32)';
+    mainButton.style.boxShadow = '0 10px 24px var(--shade)';
   }
 }
 
@@ -752,7 +730,7 @@ function ensureIssueDialog() {
   Object.assign(dialog.style, {
     position: 'fixed',
     inset: '0',
-    background: 'rgba(0,0,0,0.35)',
+    background: 'var(--backdrop)',
     zIndex: '2147483645',
     display: 'none',
     alignItems: 'center',
@@ -760,13 +738,13 @@ function ensureIssueDialog() {
   });
 
   dialog.innerHTML = `
-    <div id="gj-issue-dialog-card" style="width: min(440px, calc(100vw - 40px)); background:#fff; border-radius:10px; border:1px solid #d9e0ea; box-shadow:0 12px 28px rgba(0,0,0,0.28); overflow:hidden; font-family:system-ui,-apple-system,sans-serif;">
-      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:#f4f8ff; border-bottom:1px solid #d9e0ea;">
-        <strong style="font-size:13px; color:#1e2530;">Jira Issue</strong>
-        <button id="gj-issue-dialog-close" type="button" style="border:1px solid #d9e0ea; background:#fff; border-radius:6px; width:28px; height:28px; cursor:pointer;">×</button>
+    <div id="gj-issue-dialog-card" style="width: min(440px, calc(100vw - 40px)); background:var(--surface); border-radius:10px; border:1px solid var(--line); box-shadow:0 12px 28px var(--shade); overflow:hidden; font-family:system-ui,-apple-system,sans-serif;">
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:var(--accent-soft); border-bottom:1px solid var(--line);">
+        <strong style="font-size:13px; color:var(--ink);">Jira Issue</strong>
+        <button id="gj-issue-dialog-close" type="button" style="border:1px solid var(--line); background:var(--surface); color:var(--sub); border-radius:6px; width:28px; height:28px; cursor:pointer;">×</button>
       </div>
-      <div style="padding:12px; font-size:12px; color:#2b3647; line-height:1.55;">
-        <div id="gj-issue-dialog-key" style="font-weight:700; color:#1565c0; margin-bottom:8px;"></div>
+      <div style="padding:12px; font-size:12px; color:var(--ink); line-height:1.55;">
+        <div id="gj-issue-dialog-key" style="font-weight:700; color:var(--accent); margin-bottom:8px;"></div>
         <div id="gj-issue-dialog-summary" style="font-weight:700; margin-bottom:8px;"></div>
         <div id="gj-issue-dialog-status" style="margin-bottom:4px;"></div>
         <div id="gj-issue-dialog-assignee"></div>
@@ -778,6 +756,7 @@ function ensureIssueDialog() {
     if (e.target === dialog) dialog.style.display = 'none';
   });
 
+  self.Theme.applyVars(dialog);
   document.body.appendChild(dialog);
 
   const closeBtn = document.getElementById('gj-issue-dialog-close');
@@ -846,9 +825,9 @@ async function handleFabAddRemoteLink() {
 
 async function requestAddComment() {
   const resp = await sendRuntimeMessage({ type: MSG.POPUP_ADD_COMMENT });
-  if (resp?.duplicate) {
+  if (resp?.duplicate || resp?.unknown) {
     const proceed = window.confirm(
-      I18N.t('cs.confirm.duplicateComment', { issueKey: resp.issueKey }),
+      I18N.t(resp.duplicate ? 'cs.confirm.duplicateComment' : 'cs.confirm.unknownComment', { issueKey: resp.issueKey }),
     );
     if (!proceed) return { ok: false, cancelled: true };
     return sendRuntimeMessage({ type: MSG.POPUP_ADD_COMMENT, force: true });
@@ -865,42 +844,44 @@ async function handleFabAddComment() {
       return;
     }
     if (!resp?.ok) {
-      showToast(resp?.message || I18N.t('sw.error.commentFailed'), 'error');
+      showToast(resp?.message || I18N.t('sw.error.commentFailed'), resp?.unknown ? 'warn' : 'error');
       return;
     }
-    showToast(I18N.t('cs.toast.commentDone', { key: resp.issueKey || '' }).trim(), 'success', issueOpenAction(resp.issueKey));
+    // The comment never changes the status. A merged change offers the status set
+    // in options as the toast's one button; it moves only when that is clicked.
+    const s = resp.suggest;
+    if (s && !s.blocking.length) {
+      showToast(I18N.t('cs.toast.commentDone', { key: resp.issueKey }), 'success', transitionAction(resp.issueKey, s));
+    } else if (s) {
+      showToast(I18N.t('cs.toast.commentDoneNeedsJira', { key: resp.issueKey, status: s.toStatus, fields: s.blocking.join(', ') }),
+        'success', issueOpenAction(resp.issueKey));
+    } else {
+      showToast(I18N.t('cs.toast.commentDone', { key: resp.issueKey || '' }).trim(), 'success', issueOpenAction(resp.issueKey));
+    }
   } catch {
     showToast(I18N.t('cs.toast.requestError'), 'error');
   }
 }
 
-async function handleFabQuickApply() {
-  showToast(I18N.t('cs.toast.applying'), 'info');
-  try {
-    let resp = await sendRuntimeMessage({ type: MSG.POPUP_QUICK_APPLY });
-    if (resp?.duplicate) {
-      const proceed = window.confirm(
-        I18N.t('cs.confirm.duplicateApply', { issueKey: resp.issueKey }),
-      );
-      if (!proceed) {
-        showToast(I18N.t('cs.toast.applyCancelled'), 'info');
-        return;
+function transitionAction(issueKey, s) {
+  return {
+    label: I18N.t('cs.toast.moveTo', { status: s.toStatus }),
+    onClick: async () => {
+      try {
+        const resp = await sendRuntimeMessage({ type: MSG.POPUP_DO_TRANSITION, issueKey, transitionId: s.id, fields: s.fields });
+        if (!resp?.ok) {
+          showToast(resp?.message || I18N.t('sw.error.transitionFailed'), 'error', issueOpenAction(issueKey));
+          return;
+        }
+        showToast(I18N.t('cs.toast.moved', { key: issueKey, status: s.toStatus }), 'success');
+        // The status pill caches per issue; drop that so it shows the new status.
+        lastPillIssueKey = null;
+        refreshFabIssueState();
+      } catch {
+        showToast(I18N.t('cs.toast.requestError'), 'error');
       }
-      resp = await sendRuntimeMessage({ type: MSG.POPUP_QUICK_APPLY, force: true });
-    }
-
-    if (!resp?.ok) {
-      showToast(resp?.message || I18N.t('sw.error.applyFailed'), 'error');
-      return;
-    }
-    showToast(
-      resp.message || I18N.t('cs.toast.applyDone', { key: resp.issueKey || '' }).trim(),
-      resp.transitionFailed ? 'warn' : 'success',
-      issueOpenAction(resp.issueKey),
-    );
-  } catch {
-    showToast(I18N.t('cs.toast.requestError'), 'error');
-  }
+    },
+  };
 }
 
 async function handleFabOpenOptions() {
@@ -959,11 +940,11 @@ function buildFabActionButton({ id, icon, titleKey, onClick, iconSvg }) {
     height: '38px',
     padding: '0 14px',
     borderRadius: '19px',
-    border: 'none',
-    background: '#fff',
-    color: '#1d2b3f',
+    border: '1px solid var(--line)',
+    background: 'var(--surface)',
+    color: 'var(--ink)',
     cursor: 'pointer',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+    boxShadow: '0 4px 12px var(--shade)',
     opacity: '0',
     transform: 'translateY(6px) scale(0.94)',
     transition: 'opacity 0.16s ease, transform 0.18s ease',
@@ -990,7 +971,6 @@ const FAB_ACTION_DEFS = [
   { key: 'lookup', id: 'gj-fab-issue', icon: '🔍', titleKey: 'cs.fab.lookup', onClick: () => handleFabIssueLookup() },
   { key: 'link', id: 'gj-fab-link', icon: '🔗', titleKey: 'cs.fab.link', onClick: () => handleFabAddRemoteLink() },
   { key: 'comment', id: 'gj-fab-comment', icon: '💬', titleKey: 'cs.fab.comment', onClick: () => handleFabAddComment() },
-  { key: 'apply', id: 'gj-fab-apply', icon: '⚡', titleKey: 'cs.fab.apply', onClick: () => handleFabQuickApply() },
   { key: 'options', id: 'gj-fab-options', icon: '⚙️', titleKey: 'cs.fab.options', onClick: () => handleFabOpenOptions() },
 ];
 
@@ -998,7 +978,6 @@ const FAB_ACTION_DEFS = [
 // On Jira the FAB has no menu: clicking it opens this dialog directly.
 
 const CHANGES_DIALOG_ID = '__gj_changes_dialog__';
-const GERRIT_STATUS_COLORS = { NEW: '#1565c0', WIP: '#b26a00', MERGED: '#2e7d32', ABANDONED: '#8a94a6' };
 let closeChangesDialog = null;
 
 function showChangesDialog(title) {
@@ -1012,7 +991,7 @@ function showChangesDialog(title) {
   Object.assign(dialog.style, {
     position: 'fixed',
     inset: '0',
-    background: 'rgba(0,0,0,0.35)',
+    background: 'var(--backdrop)',
     // Above the FAB, which would otherwise float over the overlay.
     zIndex: '2147483647',
     display: 'flex',
@@ -1020,18 +999,42 @@ function showChangesDialog(title) {
     justifyContent: 'center',
   });
   dialog.innerHTML = `
-    <div data-role="card" tabindex="-1" style="width:min(560px, calc(100vw - 40px)); max-height:min(640px, calc(100vh - 40px)); display:flex; flex-direction:column; background:#fff; border-radius:10px; border:1px solid #d9e0ea; box-shadow:0 12px 28px rgba(0,0,0,0.28); overflow:hidden; font-family:system-ui,-apple-system,sans-serif; outline:none;">
-      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:#f4f8ff; border-bottom:1px solid #d9e0ea;">
-        <strong data-role="title" style="font-size:13px; color:#1e2530;"></strong>
-        <button data-role="close" type="button" style="border:1px solid #d9e0ea; background:#fff; color:#526074; font-size:16px; line-height:1; border-radius:6px; width:28px; height:28px; cursor:pointer;">×</button>
+    <div data-role="card" tabindex="-1" style="box-sizing:border-box; width:min(720px, calc(100vw - 40px)); min-width:min(420px, calc(100vw - 40px)); min-height:200px; max-width:calc(100vw - 40px); max-height:calc(100vh - 40px); resize:both; display:flex; flex-direction:column; background:var(--surface); border-radius:10px; border:1px solid var(--line); box-shadow:0 12px 28px var(--shade); overflow:hidden; font-family:system-ui,-apple-system,sans-serif; outline:none;">
+      <div style="flex:none; display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:var(--accent-soft); border-bottom:1px solid var(--line);">
+        <strong data-role="title" style="font-size:13px; color:var(--ink);"></strong>
+        <button data-role="close" type="button" style="border:1px solid var(--line); background:var(--surface); color:var(--sub); font-size:16px; line-height:1; border-radius:6px; width:28px; height:28px; cursor:pointer;">×</button>
       </div>
-      <div data-role="body" style="padding:6px 0; overflow:auto; font-size:12px; color:#2b3647; line-height:1.5;"></div>
+      <div data-role="body" style="flex:1; min-height:0; overflow:auto; font-size:12px; color:var(--ink); line-height:1.5;"></div>
     </div>
   `;
   dialog.querySelector('[data-role="title"]').textContent = title;
   dialog.querySelector('[data-role="close"]').setAttribute('aria-label', I18N.t('cs.dialog.close'));
 
+  // The card can be resized from its corner; the size is kept for next time.
+  const card = dialog.querySelector('[data-role="card"]');
+  chrome.storage.local.get(['changesDialogSize'], ({ changesDialogSize: size }) => {
+    if (size?.w) card.style.width = `${size.w}px`;
+    if (size?.h) card.style.height = `${size.h}px`;
+  });
+  let sizeTimer = null;
+  const sizeObserver = new ResizeObserver(() => {
+    clearTimeout(sizeTimer);
+    sizeTimer = setTimeout(() => {
+      // What CSS resize set (px), not the rendered size, which a small window clips.
+      const w = parseFloat(card.style.width);
+      const h = parseFloat(card.style.height);
+      if (!card.isConnected || !card.style.width.endsWith('px') || !h) return;
+      try {
+        chrome.storage.local.set({ changesDialogSize: { w: Math.round(w), h: Math.round(h) } });
+      } catch {
+        // Extension reloaded under this tab.
+      }
+    }, 300);
+  });
+
   const close = () => {
+    clearTimeout(sizeTimer);
+    sizeObserver.disconnect();
     dialog.remove();
     window.removeEventListener('keydown', onKeydown, true);
     closeChangesDialog = null;
@@ -1049,10 +1052,18 @@ function showChangesDialog(title) {
   });
   // Capture on window, the earliest point, so Jira's own Escape handlers never see it.
   window.addEventListener('keydown', onKeydown, true);
+  self.Theme.applyVars(dialog);
   document.body.appendChild(dialog);
+  sizeObserver.observe(card);
   closeChangesDialog = close;
   dialog.querySelector('[data-role="card"]').focus();
-  return dialog.querySelector('[data-role="body"]');
+  // The list renders in a shadow root so the Jira page's CSS cannot reach it.
+  const shadow = dialog.querySelector('[data-role="body"]').attachShadow({ mode: 'open' });
+  const style = document.createElement('style');
+  style.textContent = self.ChangeList.CSS;
+  const body = document.createElement('div');
+  shadow.append(style, body);
+  return body;
 }
 
 function appendDialogLink(body, href, text) {
@@ -1061,7 +1072,7 @@ function appendDialogLink(body, href, text) {
   link.target = '_blank';
   link.rel = 'noopener noreferrer';
   link.textContent = text;
-  Object.assign(link.style, { display: 'inline-block', margin: '8px 14px 10px', color: '#1565c0', fontWeight: '600' });
+  Object.assign(link.style, { display: 'inline-block', margin: '8px 14px 10px', color: 'var(--accent)', fontWeight: '600' });
   body.appendChild(link);
 }
 
@@ -1071,51 +1082,6 @@ function setChangesDialogMessage(body, text) {
   msg.textContent = text;
   Object.assign(msg.style, { padding: '10px 14px', whiteSpace: 'pre-line' });
   body.appendChild(msg);
-}
-
-function renderChangesList(body, changes, more, searchUrl) {
-  body.textContent = '';
-  for (const c of changes) {
-    const row = document.createElement('a');
-    row.href = c.url;
-    row.target = '_blank';
-    row.rel = 'noopener noreferrer';
-    Object.assign(row.style, {
-      display: 'block',
-      padding: '8px 14px',
-      borderBottom: '1px solid #eef1f6',
-      color: 'inherit',
-      textDecoration: 'none',
-    });
-    row.addEventListener('mouseenter', () => { row.style.background = '#f4f8ff'; });
-    row.addEventListener('mouseleave', () => { row.style.background = ''; });
-
-    const head = document.createElement('div');
-    const status = document.createElement('span');
-    status.textContent = c.status;
-    Object.assign(status.style, {
-      display: 'inline-block',
-      marginRight: '6px',
-      padding: '0 6px',
-      borderRadius: '4px',
-      fontSize: '10.5px',
-      fontWeight: '700',
-      color: '#fff',
-      background: GERRIT_STATUS_COLORS[c.status] || '#8a94a6',
-    });
-    const subject = document.createElement('span');
-    subject.textContent = `${c.number} · ${c.subject}`;
-    subject.style.fontWeight = '600';
-    head.append(status, subject);
-
-    const meta = document.createElement('div');
-    meta.textContent = [`${c.project} / ${c.branch}`, c.owner, c.date].filter(Boolean).join(' · ');
-    Object.assign(meta.style, { color: '#526074', fontSize: '11.5px', marginTop: '2px' });
-
-    row.append(head, meta);
-    body.appendChild(row);
-  }
-  if (more && searchUrl) appendDialogLink(body, searchUrl, I18N.t('gerrit.viewAll'));
 }
 
 async function handleFabGerritChanges() {
@@ -1134,7 +1100,7 @@ async function handleFabGerritChanges() {
       setChangesDialogMessage(body, I18N.t(resp.signedIn ? 'gerrit.empty' : 'gerrit.notSignedIn'));
       if (resp.loginUrl) appendDialogLink(body, resp.loginUrl, I18N.t('gerrit.signIn'));
     }
-    else renderChangesList(body, resp.changes, resp.more, resp.searchUrl);
+    else self.ChangeList.render(body, { issueKey: key, resp, send: sendRuntimeMessage });
   } catch {
     setChangesDialogMessage(body, I18N.t('cs.toast.requestError'));
   }
@@ -1324,12 +1290,12 @@ function renderFab() {
     height: '56px',
     borderRadius: '28px',
     border: 'none',
-    background: '#1565c0',
-    color: '#fff',
+    background: 'var(--fill)',
+    color: 'var(--fill-ink)',
     fontSize: '14px',
     fontWeight: '700',
     cursor: 'pointer',
-    boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+    boxShadow: '0 6px 18px var(--shade)',
     transition: 'transform 0.16s ease, box-shadow 0.16s ease',
   });
 
@@ -1345,6 +1311,7 @@ function renderFab() {
 
   root.appendChild(menu);
   root.appendChild(mainButton);
+  self.Theme.applyVars(root);
   document.body.appendChild(root);
   restoreFabPosition(root);
   refreshFabIssueState();
@@ -1372,7 +1339,7 @@ function isChangePage() {
 function setFabMainState(detected) {
   const main = document.getElementById('gj-fab-main');
   if (!main) return;
-  main.style.background = detected ? '#1565c0' : '#8a94a6';
+  main.style.background = detected ? 'var(--fill)' : 'var(--mute)';
   if (onJira) main.title = I18N.t('gerrit.title');
   else main.title = I18N.t(detected ? 'cs.fab.mainTitle' : 'cs.fab.mainTitleNoKey');
 }
@@ -1392,14 +1359,14 @@ function ensureStatusPill(root, issueKey) {
       gap: '1px',
       padding: '4px 12px',
       borderRadius: '13px',
-      border: '1px solid rgba(21,101,192,0.35)',
-      background: 'rgba(255,255,255,0.96)',
-      color: '#1565c0',
+      border: '1px solid var(--line)',
+      background: 'var(--surface)',
+      color: 'var(--accent)',
       fontSize: '11.5px',
       fontWeight: '700',
       lineHeight: '1.3',
       cursor: 'pointer',
-      boxShadow: '0 3px 10px rgba(0,0,0,0.18)',
+      boxShadow: '0 3px 10px var(--shade)',
       whiteSpace: 'nowrap',
     });
     const keyLine = document.createElement('span');
@@ -1409,7 +1376,7 @@ function ensureStatusPill(root, issueKey) {
     Object.assign(statusLine.style, {
       fontSize: '10.5px',
       fontWeight: '600',
-      color: '#526074',
+      color: 'var(--sub)',
       display: 'none',
     });
     pill.appendChild(keyLine);

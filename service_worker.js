@@ -105,7 +105,7 @@ async function registerSiteContentScripts() {
       matches: [`${origin}/*`],
       // Confluence shares the Jira Cloud origin.
       ...(id === 'jira' ? { excludeMatches: [`${origin}/wiki/*`] } : {}),
-      js: ['i18n.js', 'message_types.js', 'content_script.js'],
+      js: ['i18n.js', 'message_types.js', 'theme.js', 'change_list.js', 'content_script.js'],
       runAt: 'document_idle',
     });
   }
@@ -141,7 +141,7 @@ function injectContentScripts(tabId) {
     chrome.scripting.executeScript(
       {
         target: { tabId },
-        files: ['i18n.js', 'message_types.js', 'content_script.js'],
+        files: ['i18n.js', 'message_types.js', 'theme.js', 'change_list.js', 'content_script.js'],
       },
       () => {
         if (chrome.runtime.lastError) {
@@ -501,8 +501,10 @@ const jiraClient = {
     const current = requiredKeys.length ? await this.getIssueFields(issueKey, requiredKeys) : {};
     // The popup preselects the site default resolution, so "Change status" alone
     // does what a plain Jira transition would.
+    // The resolution chosen in options wins; otherwise the site default.
+    const { applyResolution } = await chrome.storage.local.get(['applyResolution']);
     const defaultResolution = requiredKeys.includes('resolution') && isEmptyFieldValue(current.resolution)
-      ? await this.getResolutions().then((list) => list.find((r) => r.isDefault)?.id || '').catch(() => '')
+      ? applyResolution?.id || await this.getResolutions().then((list) => list.find((r) => r.isDefault)?.id || '').catch(() => '')
       : '';
 
     return transitions.map((t) => ({
@@ -618,22 +620,48 @@ const jiraClient = {
     }
   },
 
+  // All comments as raw ADF JSON strings, for the duplicate check. null when they
+  // could not be read, so callers say "could not check" instead of "none".
+  async getCommentBodies(issueKey) {
+    if (!isValidIssueKey(issueKey)) return null;
+
+    const bodies = [];
+    // ponytail: 10 pages (1000 comments); an issue past that reads as unknown.
+    for (let page = 0; page < 10; page += 1) {
+      const resp = await this.fetch(
+        `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment?startAt=${bodies.length}&maxResults=100`,
+        { method: 'GET' },
+      ).catch(() => null);
+      if (resp?.status !== 200) return null;
+      let json;
+      try {
+        json = await resp.json();
+      } catch {
+        return null;
+      }
+      const comments = Array.isArray(json?.comments) ? json.comments : [];
+      bodies.push(...comments.map((c) => JSON.stringify(c?.body || '')));
+      if (!comments.length || bodies.length >= Number(json?.total || 0)) return bodies;
+    }
+    return null;
+  },
+
+  // true / false, or null when the comments could not be read.
   async hasGerritComment(issueKey, needle) {
-    if (!isValidIssueKey(issueKey) || !needle) return false;
+    const bodies = await this.getCommentBodies(issueKey);
+    return bodies && !!needle && hasNeedle(bodies, needle);
+  },
 
-    const resp = await this.fetch(
-      `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment?maxResults=100&orderBy=-created`,
-      { method: 'GET' },
-    );
-    // Duplicate check is best-effort: on lookup failure, do not block comment creation.
-    if (resp.status !== 200) return false;
-
+  // globalIds of the issue's web links, or null when they could not be read.
+  async getRemoteLinkIds(issueKey) {
+    if (!isValidIssueKey(issueKey)) return null;
+    const resp = await this.fetch(`/rest/api/3/issue/${encodeURIComponent(issueKey)}/remotelink`, { method: 'GET' }).catch(() => null);
+    if (resp?.status !== 200) return null;
     try {
       const json = await resp.json();
-      const comments = Array.isArray(json?.comments) ? json.comments : [];
-      return comments.some((c) => JSON.stringify(c?.body || '').includes(needle));
+      return (Array.isArray(json) ? json : []).map((l) => String(l?.globalId || ''));
     } catch {
-      return false;
+      return null;
     }
   },
 
@@ -661,6 +689,12 @@ const jiraClient = {
   },
 };
 
+// A link added before the change number was known carries the Change-Id instead.
+function hasLinkFor(linkIds, context) {
+  return (!!context.changeNum && linkIds.includes(`gerrit:change:${context.changeNum}`))
+    || (!!context.changeId && linkIds.includes(`gerrit:changeid:${context.changeId}`));
+}
+
 function buildRemoteLinkPayload(context) {
   const payload = {
     object: {
@@ -682,8 +716,10 @@ async function buildCommentText(context) {
   const { commentTemplate } = await loadStorageData();
   const template = (commentTemplate || '').trim() || DEFAULT_TEMPLATE;
   const reflectedAt = formatDateMaybe(context.submittedAt);
+  // Not merged yet: a "reflected at" line would stay empty, so leave it out.
+  const lines = reflectedAt ? template : template.split('\n').filter((l) => !l.includes('{date}')).join('\n');
 
-  const rendered = renderTemplate(template, {
+  const rendered = renderTemplate(lines, {
     title: context.subject || '(no title)',
     body: context.body || '',
     branch: context.branch || '',
@@ -821,9 +857,28 @@ async function handlePopupAddRemoteLink(issueKeyOverride) {
   }
 }
 
+// issue|change|part writes in flight (Jira list, popup and FAB). Read-then-write
+// duplicate checks are not atomic, so a second write for the same change is refused.
+const addsInFlight = new Set();
+
+// A trailing digit means another change: /+/12 must not match /+/123.
+function hasNeedle(bodies, needle) {
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`${escaped}(?!\\d)`);
+  return bodies.some((b) => re.test(b));
+}
+
+// A change counts as commented when a comment carries its URL, which every comment
+// has (ensureCommentMinimum). By change number, not Change-Id: a cherry-pick to a
+// release branch shares the Change-Id but gets its own comment.
 function buildDuplicateNeedle(context) {
   if (context.project && context.changeNum) {
-    return `/c/${context.project}/+/${context.changeNum}`;
+    // Encoded the way change URLs are (gerritChangeUrl), e.g. c%2B%2B/lib. The project
+    // may come from the page URL already encoded, so decode it first. The origin in
+    // front keeps project "a" from matching inside "c/a".
+    let project = context.project;
+    try { project = decodeURIComponent(project); } catch { /* keep as is */ }
+    return `${sites.gerritOrigin}/c/${encodeURIComponent(project).replace(/%2F/g, '/')}/+/${context.changeNum}`;
   }
   return context.gerritUrl || '';
 }
@@ -876,23 +931,29 @@ async function handlePopupCheckComment(issueKeyOverride) {
   const target = await resolveCommentTarget(issueKeyOverride);
   if (!target.ok) return target;
 
-  try {
-    const duplicated = await jiraClient.hasGerritComment(
-      target.issueKey,
-      buildDuplicateNeedle(target.context),
-    );
-    return { ok: true, issueKey: target.issueKey, duplicate: duplicated };
-  } catch (err) {
-    return {
-      ok: false,
-      message: mapClientError(err, I18N.t('sw.error.checkCommentFailed')),
-    };
-  }
+  // Each is true / false, or null when it could not be checked.
+  const [commented, linkIds] = await Promise.all([
+    jiraClient.hasGerritComment(target.issueKey, buildDuplicateNeedle(target.context)).catch(() => null),
+    jiraClient.getRemoteLinkIds(target.issueKey).catch(() => null),
+  ]);
+  return { ok: true, issueKey: target.issueKey, commented, linked: linkIds && hasLinkFor(linkIds, { changeNum: target.context.changeNum }) };
 }
 
 async function handlePopupAddComment(issueKeyOverride, force, commentText) {
   const target = await resolveCommentTarget(issueKeyOverride);
   if (!target.ok) return target;
+  // Same lock as the Jira list: one comment write per change at a time.
+  const lock = `${target.issueKey}|${target.context.changeNum}|comment`;
+  if (addsInFlight.has(lock)) return { ok: false, issueKey: target.issueKey, message: I18N.t('sw.list.inFlight') };
+  addsInFlight.add(lock);
+  try {
+    return await addCommentFor(target, force, commentText);
+  } finally {
+    addsInFlight.delete(lock);
+  }
+}
+
+async function addCommentFor(target, force, commentText) {
   const { context, issueKey } = target;
 
   try {
@@ -901,6 +962,9 @@ async function handlePopupAddComment(issueKeyOverride, force, commentText) {
         issueKey,
         buildDuplicateNeedle(context),
       );
+      if (duplicated === null) {
+        return { ok: false, unknown: true, issueKey, message: I18N.t('sw.comment.unknown') };
+      }
       if (duplicated) {
         return {
           ok: false,
@@ -913,7 +977,7 @@ async function handlePopupAddComment(issueKeyOverride, force, commentText) {
 
     const adfDoc = await buildCommentAdf(context, commentText);
     await jiraClient.addComment(issueKey, adfDoc);
-    return { ok: true, issueKey };
+    return { ok: true, issueKey, suggest: context.submittedAt ? await suggestTransition(issueKey) : null };
   } catch (err) {
     return {
       ok: false,
@@ -922,104 +986,43 @@ async function handlePopupAddComment(issueKeyOverride, force, commentText) {
   }
 }
 
-async function transitionByNameIfConfigured(issueKey) {
+// The status a merged change's comment offers to move the issue to (options:
+// "status to offer after a comment"). Offered only: the popup preselects it and
+// the FAB toast shows it as a button. null when that is off, the issue is already
+// there, or no transition leads there from the current status.
+async function suggestTransition(issueKey) {
   const { applyTransitionEnabled, applyTransitionName } = await loadBehaviorSettings();
-  if (!applyTransitionEnabled || !applyTransitionName) {
-    return { attempted: false };
-  }
+  if (!applyTransitionEnabled || !applyTransitionName) return null;
 
   const wanted = applyTransitionName.toLowerCase();
   try {
-    const transitions = await jiraClient.getTransitions(issueKey);
-    const match = transitions.find(
-      (t) => t.name.toLowerCase() === wanted || t.toStatus.toLowerCase() === wanted,
-    );
-    if (!match) {
-      return {
-        attempted: true,
-        ok: false,
-        note: I18N.t('sw.transition.noMatch', { name: applyTransitionName }),
-      };
-    }
+    const [issue, transitions] = await Promise.all([jiraClient.getIssue(issueKey), jiraClient.getTransitions(issueKey)]);
+    const current = issue.status.toLowerCase();
+    const match = transitions.find((t) => t.name.toLowerCase() === wanted || t.toStatus.toLowerCase() === wanted);
+    if (!match || current === wanted || match.toStatus.toLowerCase() === current) return null;
 
-    // Same rule as the popup: only resolution is filled in here, from the default
-    // chosen in options. Without one it is left out and Jira applies its own
-    // default resolution (Done on Jira Cloud), as a transition always did before.
-    // Any other empty required field is left to Jira's own dialog.
+    // Same rule as the popup: only resolution is filled in, from the default chosen
+    // in options (without one Jira applies its own). Any other empty required field
+    // is left to Jira's own dialog, so the caller sends the user there.
     const { applyResolution } = await chrome.storage.local.get(['applyResolution']);
     const needs = match.needs || [];
-    const blocking = needs.filter((f) => f.key !== 'resolution');
-    if (blocking.length) {
-      return {
-        attempted: true,
-        ok: false,
-        note: I18N.t('sw.transition.needsFields', { fields: blocking.map((f) => f.name).join(', ') }),
-      };
-    }
-    const fields = needs.length && applyResolution?.id ? { resolution: { id: String(applyResolution.id) } } : {};
-    await jiraClient.doTransition(issueKey, match.id, fields);
-    return { attempted: true, ok: true, note: match.toStatus || match.name };
-  } catch (err) {
     return {
-      attempted: true,
-      ok: false,
-      note: mapClientError(err, I18N.t('sw.transition.shortFail')),
+      id: match.id,
+      toStatus: match.toStatus || match.name,
+      blocking: needs.filter((f) => f.key !== 'resolution').map((f) => f.name),
+      fields: resolutionField(needs, applyResolution),
     };
+  } catch {
+    return null;
   }
 }
 
-async function handlePopupQuickApply(issueKeyOverride, commentText, force) {
-  const target = await resolveCommentTarget(issueKeyOverride);
-  if (!target.ok) return target;
-  const { context, issueKey } = target;
-
-  try {
-    if (!force) {
-      const duplicated = await jiraClient.hasGerritComment(
-        issueKey,
-        buildDuplicateNeedle(context),
-      );
-      if (duplicated) {
-        return {
-          ok: false,
-          duplicate: true,
-          issueKey,
-          message: I18N.t('sw.comment.duplicate', { issueKey }),
-        };
-      }
-    }
-
-    await jiraClient.addRemoteLink(issueKey, buildRemoteLinkPayload(context));
-
-    const adfDoc = await buildCommentAdf(context, commentText);
-    await jiraClient.addComment(issueKey, adfDoc);
-
-    const transition = await transitionByNameIfConfigured(issueKey);
-
-    let summary;
-    if (transition.attempted && transition.ok) {
-      summary = I18N.t('sw.apply.doneWithTransition', { issueKey, status: transition.note });
-    } else if (transition.attempted) {
-      summary = I18N.t('sw.apply.doneTransitionFailed', { issueKey, note: transition.note });
-    } else {
-      summary = I18N.t('sw.apply.done', { issueKey });
-    }
-
-    return {
-      ok: true,
-      issueKey,
-      transitioned: !!(transition.attempted && transition.ok),
-      // Link and comment went through but the status did not change: callers show
-      // this as a warning, not a plain success.
-      transitionFailed: !!(transition.attempted && !transition.ok),
-      message: summary,
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      message: mapClientError(err, I18N.t('sw.error.applyFailed')),
-    };
-  }
+// The resolution a transition needs: the one chosen in options, else the site
+// default (what the popup preselects too).
+function resolutionField(needs, applyResolution) {
+  const need = needs.find((f) => f.key === 'resolution');
+  const id = need && (applyResolution?.id || need.value);
+  return id ? [{ key: 'resolution', id: String(id) }] : [];
 }
 
 async function handlePopupSetFabEnabled(enabled) {
@@ -1046,79 +1049,171 @@ async function handlePopupSetFabEnabled(enabled) {
   }
 }
 
-// Changes whose commit message mentions the issue key. With a Gerrit HTTP password
-// saved in options, authenticates as that account (it wins over the browser
-// session, and a wrong password is reported rather than silently falling back).
-// Otherwise uses the browser's Gerrit login cookie, seeing what the Gerrit UI sees.
-async function handleGetGerritChanges(issueKey) {
-  const key = String(issueKey || '').trim().toUpperCase();
-  if (!isValidIssueKey(key)) return { ok: false, message: I18N.t('sw.error.noIssueKey') };
-  if (!sites.gerritOrigin) return { ok: false, message: I18N.t('sw.error.noGerritOrigin') };
-
+// GET on the Gerrit REST API. With a Gerrit HTTP password saved in options,
+// authenticates as that account (it wins over the browser session, and a wrong
+// password is reported rather than silently falling back). Otherwise uses the
+// browser's Gerrit login cookie, seeing what the Gerrit UI sees.
+// Returns { json, basic } or { message }.
+async function gerritGet(path) {
   const { gerritUser, gerritPassword } = await chrome.storage.local.get(['gerritUser', 'gerritPassword']);
   const basic = gerritUser && gerritPassword ? basicAuth(gerritUser, gerritPassword) : '';
 
-  // An issue rarely has more than a handful of changes; past this the popup links
-  // to the full Gerrit search instead of growing a long list.
-  const limit = 10;
-  const query = encodeURIComponent(`message:"${key}"`);
   let resp;
   try {
     resp = await fetch(
-      `${sites.gerritOrigin}${basic ? '/a' : ''}/changes/?q=${query}&n=${limit}&o=DETAILED_ACCOUNTS`,
+      `${sites.gerritOrigin}${basic ? '/a' : ''}${path}`,
       basic
         ? { credentials: 'omit', headers: { Accept: 'application/json', Authorization: `Basic ${basic}` } }
         : { credentials: 'include', headers: { Accept: 'application/json' } },
     );
   } catch {
     // Also lands here when an SSO login redirect leaves the Gerrit origin.
-    return { ok: false, message: I18N.t('sw.gerrit.unreachable') };
+    return { message: I18N.t('sw.gerrit.unreachable') };
   }
   if (basic && resp.status === 401) {
-    return { ok: false, message: I18N.t('sw.gerrit.badPassword') };
+    return { message: I18N.t('sw.gerrit.badPassword') };
   }
   if (!resp.ok || new URL(resp.url).origin !== sites.gerritOrigin) {
-    return { ok: false, message: I18N.t('sw.gerrit.searchFailed', { status: resp.status }) };
+    return { message: I18N.t('sw.gerrit.searchFailed', { status: resp.status }) };
   }
-
-  let list;
   try {
     // Gerrit prefixes JSON with )]}' to block XSSI.
-    list = JSON.parse((await resp.text()).replace(/^\)\]\}'\s*/, ''));
+    return { json: JSON.parse((await resp.text()).replace(/^\)\]\}'\s*/, '')), basic: !!basic };
   } catch {
-    return { ok: false, message: I18N.t('sw.gerrit.searchFailed', { status: resp.status }) };
+    return { message: I18N.t('sw.gerrit.searchFailed', { status: resp.status }) };
   }
-  if (!Array.isArray(list)) list = [];
+}
 
-  // An anonymous search still succeeds but only sees public changes, so an empty
-  // result needs a login check: /accounts/self answers 403 without a session.
-  let signedIn = true;
-  if (!list.length && !basic) {
-    const me = await fetch(`${sites.gerritOrigin}/accounts/self`, { credentials: 'include' }).catch(() => null);
-    signedIn = !!me?.ok && new URL(me.url).origin === sites.gerritOrigin;
-  }
+function gerritChangeUrl(c) {
+  return `${sites.gerritOrigin}/c/${encodeURIComponent(c.project).replace(/%2F/g, '/')}/+/${c._number}`;
+}
 
+// Changes whose commit message mentions the issue key, each with whether this
+// issue already has its comment and its web link (true / false, or null when that
+// could not be read).
+async function handleGetGerritChanges(issueKey) {
+  const key = String(issueKey || '').trim().toUpperCase();
+  if (!isValidIssueKey(key)) return { ok: false, message: I18N.t('sw.error.noIssueKey') };
+  if (!sites.gerritOrigin) return { ok: false, message: I18N.t('sw.error.noGerritOrigin') };
+
+  // Jira reads run alongside the Gerrit search. Without Jira credentials they are
+  // just null, and the list shows "could not check".
+  const commentsPromise = jiraClient.getCommentBodies(key).catch(() => null);
+  const linksPromise = jiraClient.getRemoteLinkIds(key).catch(() => null);
+
+  // An issue rarely has more than a handful of changes; past this the list links
+  // to the full Gerrit search instead of growing long.
+  const limit = 10;
+  const query = encodeURIComponent(`message:"${key}"`);
+  // The commit message tells which issue a change is really for; the account
+  // tells which changes are mine (only those start checked in the list).
+  const [got, me] = await Promise.all([
+    gerritGet(`/changes/?q=${query}&n=${limit}&o=DETAILED_ACCOUNTS&o=CURRENT_REVISION&o=CURRENT_COMMIT`),
+    gerritGet('/accounts/self'),
+  ]);
+  if (got.message) return { ok: false, message: got.message };
+  const list = Array.isArray(got.json) ? got.json : [];
+  // An anonymous search still succeeds but only sees public changes; /accounts/self
+  // answers 403 without a session.
+  const signedIn = !me.message;
+  const selfId = me.json?._account_id;
+
+  const [bodies, linkIds] = await Promise.all([commentsPromise, linksPromise]);
+  // A Change-Id web link only tells which change it is when no cherry-pick shares it.
+  const sameChangeId = {};
+  for (const c of list) sameChangeId[c.change_id] = (sameChangeId[c.change_id] || 0) + 1;
   return {
     ok: true,
     signedIn,
     loginUrl: signedIn ? '' : `${sites.gerritOrigin}/login/`,
     more: !!list[list.length - 1]?._more_changes,
     searchUrl: `${sites.gerritOrigin}/q/${query}`,
-    changes: list.map((c) => ({
-      number: c._number,
-      subject: String(c.subject || ''),
-      // Gerrit's UI shows work-in-progress changes as WIP rather than NEW.
-      status: c.work_in_progress && c.status === 'NEW' ? 'WIP' : String(c.status || ''),
-      project: String(c.project || ''),
-      branch: String(c.branch || ''),
-      owner: String(c.owner?.name || c.owner?.username || ''),
-      // Merged changes show when they were merged; the rest when they last changed.
-      date: c.submitted
-        ? I18N.t('gerrit.date.merged', { date: formatDateMaybe(c.submitted).slice(0, 10) })
-        : I18N.t('gerrit.date.updated', { date: formatDateMaybe(c.updated).slice(0, 10) }),
-      url: `${sites.gerritOrigin}/c/${encodeURIComponent(c.project).replace(/%2F/g, '/')}/+/${c._number}`,
-    })),
+    changes: list.map((c) => {
+      const subject = String(c.subject || '');
+      const ctx = { project: String(c.project || ''), changeNum: String(c._number) };
+      return {
+        number: c._number,
+        subject,
+        // Gerrit's UI shows work-in-progress changes as WIP rather than NEW.
+        status: c.work_in_progress && c.status === 'NEW' ? 'WIP' : String(c.status || ''),
+        project: ctx.project,
+        branch: String(c.branch || ''),
+        owner: String(c.owner?.name || c.owner?.username || ''),
+        // null when the Gerrit account is unknown (anonymous, or the lookup failed).
+        mine: selfId == null ? null : c.owner?._account_id === selfId,
+        mainKey: self.mainIssueKey(c.revisions?.[c.current_revision]?.commit?.message || subject) || '',
+        revert: !!c.revert_of || subject.startsWith('Revert "'),
+        cherryOf: Number(c.cherry_pick_of_change) || 0,
+        // Merged changes show when they were merged; the rest when they last changed.
+        date: c.submitted
+          ? I18N.t('gerrit.date.merged', { date: formatDateMaybe(c.submitted).slice(0, 10) })
+          : I18N.t('gerrit.date.updated', { date: formatDateMaybe(c.updated).slice(0, 10) }),
+        url: gerritChangeUrl(c),
+        commented: bodies && hasNeedle(bodies, buildDuplicateNeedle(ctx)),
+        linked: linkIds && hasLinkFor(linkIds, {
+          changeNum: String(c._number),
+          changeId: sameChangeId[c.change_id] === 1 ? String(c.change_id || '') : '',
+        }),
+      };
+    }),
   };
+}
+
+// The Jira list's per-change comment and web link icons (and its bulk buttons,
+// one change per call). Merged changes only: the list records what was merged.
+// No status change here; the user is on the issue and can change it right there.
+async function handleAddFromJira(issueKey, project, changeNum, part, force) {
+  const lock = `${String(issueKey).toUpperCase()}|${changeNum}|${part}`;
+  if (addsInFlight.has(lock)) return { ok: false, message: I18N.t('sw.list.inFlight') };
+  addsInFlight.add(lock);
+  try {
+    return await addFromJira(issueKey, project, changeNum, part, force);
+  } finally {
+    addsInFlight.delete(lock);
+  }
+}
+
+async function addFromJira(issueKey, project, changeNum, part, force) {
+  const key = String(issueKey || '').trim().toUpperCase();
+  if (!isValidIssueKey(key)) return { ok: false, message: I18N.t('sw.error.noIssueKey') };
+  if (!sites.gerritOrigin) return { ok: false, message: I18N.t('sw.error.noGerritOrigin') };
+  const num = String(changeNum || '');
+  if (!/^\d+$/.test(num) || !project) return { ok: false, message: I18N.t('sw.error.invalidGerritUrl') };
+
+  const id = encodeURIComponent(`${project}~${num}`);
+  const got = await gerritGet(`/changes/${id}?o=CURRENT_REVISION&o=CURRENT_COMMIT&o=DETAILED_ACCOUNTS`);
+  if (got.message) return { ok: false, message: got.message };
+  const c = got.json || {};
+  if (c.status !== 'MERGED') return { ok: false, message: I18N.t('sw.list.notMerged') };
+
+  const context = {
+    subject: String(c.subject || '').trim().slice(0, 500),
+    gerritUrl: gerritChangeUrl(c),
+    branch: String(c.branch || ''),
+    body: self.commitBodyFromMessage(c.revisions?.[c.current_revision]?.commit?.message),
+    changeNum: String(c._number),
+    project: String(c.project || ''),
+    owner: String(c.owner?.name || c.owner?.username || ''),
+    changeId: String(c.change_id || ''),
+    submittedAt: String(c.submitted || ''),
+  };
+
+  try {
+    if (part === 'link') {
+      // Same globalId as before, so Jira updates the link instead of adding one.
+      await jiraClient.addRemoteLink(key, buildRemoteLinkPayload(context));
+      return { ok: true, message: I18N.t('sw.list.linkDone', { issueKey: key }) };
+    }
+    if (!force) {
+      const commented = await jiraClient.hasGerritComment(key, buildDuplicateNeedle(context));
+      if (commented === null) return { ok: false, unknown: true, message: I18N.t('sw.comment.unknown') };
+      if (commented) return { ok: false, duplicate: true, message: I18N.t('sw.comment.duplicate', { issueKey: key }) };
+    }
+    await jiraClient.addComment(key, await buildCommentAdf(context));
+    return { ok: true, message: I18N.t('sw.list.commentDone', { issueKey: key }) };
+  } catch (err) {
+    return { ok: false, message: mapClientError(err, I18N.t(part === 'link' ? 'sw.error.remoteLinkFailed' : 'sw.error.commentFailed')) };
+  }
 }
 
 // btoa only takes Latin-1; encode as UTF-8 first so non-ASCII usernames work.
@@ -1184,11 +1279,6 @@ function dispatchMessage(msg, sendResponse) {
     return true;
   }
 
-  if (msg.type === MSG.POPUP_QUICK_APPLY) {
-    handlePopupQuickApply(msg.issueKeyOverride, msg.commentText, !!msg.force).then(sendResponse);
-    return true;
-  }
-
   if (msg.type === MSG.GET_JIRA_RESOLUTIONS) {
     jiraClient.getResolutions()
       .then((resolutions) => sendResponse({ ok: true, resolutions }))
@@ -1214,6 +1304,13 @@ function dispatchMessage(msg, sendResponse) {
     handleGetGerritChanges(msg.issueKey)
       .then(sendResponse)
       .catch(() => sendResponse({ ok: false, message: I18N.t('sw.gerrit.unreachable') }));
+    return true;
+  }
+
+  if (msg.type === MSG.JIRA_LIST_ADD) {
+    handleAddFromJira(msg.issueKey, msg.project, msg.changeNum, msg.part, !!msg.force)
+      .then(sendResponse)
+      .catch(() => sendResponse({ ok: false, message: I18N.t('cs.toast.requestError') }));
     return true;
   }
 

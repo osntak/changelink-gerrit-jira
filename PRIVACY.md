@@ -21,10 +21,10 @@ nothing is copied to your other devices either.
 ## What it is used for
 
 The email and API token are used only to authenticate against the Jira site you configured.
-The requests made are issue lookups, remote links, comments, and status transitions.
+The requests made are issue lookups, remote links, comments, and status transitions, plus reading the issue's comments and remote links so the same change is not recorded twice.
 
 To find the Gerrit changes related to a Jira issue, the extension sends a search request to
-the Gerrit URL you configured. If you saved a Gerrit HTTP password, it authenticates with
+the Gerrit URL you configured, plus an account lookup and change detail reads. If you saved a Gerrit HTTP password, it authenticates with
 that; otherwise it uses the Gerrit session you are already signed in with in the browser.
 
 ## What leaves your browser
