@@ -110,10 +110,7 @@ I18N.init(() => {
       }
 
       // Populate the status and resolution combos from the Jira site when credentials exist.
-      if (jiraEmail && jiraToken) {
-        loadStatusOptions(savedTransition);
-        loadResolutionOptions(savedResolution?.id);
-      }
+      if (jiraEmail && jiraToken) loadJiraLists();
     },
   );
 });
@@ -157,11 +154,18 @@ function setResolutionOptions(resolutions, selectedId) {
   optResolutionEl.value = selectedId || '';
 }
 
-function loadResolutionOptions(selectedId) {
+// Fills both combos from the Jira site. Runs on open when an account is saved, and
+// again once a save or a connection test succeeds: a first-time setup starts with
+// no account, so the lists would otherwise stay empty until the page is reopened.
+function loadJiraLists() {
+  chrome.runtime.sendMessage({ type: MSG.GET_JIRA_STATUSES }, (resp) => {
+    if (chrome.runtime.lastError || !resp?.ok) return;
+    setTransitionOptions(resp.statuses || [], optTransitionNameEl.value);
+  });
   chrome.runtime.sendMessage({ type: MSG.GET_JIRA_RESOLUTIONS }, (resp) => {
     if (chrome.runtime.lastError || !resp?.ok) return;
     const list = resp.resolutions || [];
-    setResolutionOptions(list, optResolutionEl.value || selectedId || list.find((r) => r.isDefault)?.id || '');
+    setResolutionOptions(list, optResolutionEl.value || list.find((r) => r.isDefault)?.id || '');
   });
 }
 
@@ -182,14 +186,6 @@ function setTransitionOptions(statuses, selected) {
     optTransitionNameEl.appendChild(option);
   }
   optTransitionNameEl.value = selected || '';
-}
-
-function loadStatusOptions(selected) {
-  chrome.runtime.sendMessage({ type: MSG.GET_JIRA_STATUSES }, (resp) => {
-    if (chrome.runtime.lastError || !resp?.ok) return;
-    const current = optTransitionNameEl.value || selected || '';
-    setTransitionOptions(resp.statuses || [], current);
-  });
 }
 
 // ── Token visibility ──────────────────────────────────────────────────────────
@@ -341,6 +337,7 @@ btnSave.addEventListener('click', async () => {
     }
 
     setStatus(I18N.t('options.status.saved'), 'ok', 3000);
+    loadJiraLists();
   });
 });
 
@@ -369,6 +366,7 @@ async function describeJiraTest(result, email, token) {
     // Passing the test but forgetting 저장 was a recurring trap: persist the
     // verified credentials immediately.
     const saved = await saveCredentials({ jiraEmail: email, jiraToken: token });
+    if (saved) loadJiraLists();
     return { text: I18N.t(saved ? 'options.status.testOkSaved' : 'options.status.testOkSaveFailed'), ok: saved };
   }
   if (result.status === 401) {
