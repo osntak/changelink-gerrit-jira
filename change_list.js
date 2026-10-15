@@ -224,6 +224,8 @@
 
     // Bulk: one change at a time, stop at the first failure and leave the rest checked.
     // `targets` is the set the confirm showed, so a later checkbox change cannot add to it.
+    // The list is newest first; writing from the bottom up leaves the newest change last
+    // in Jira, so the comments and links read in the order the changes happened.
     async function runBulk(part, targets) {
       if (!targets.length || running || rows.some((r) => r.cBusy || r.lBusy)) return;
       running = true;
@@ -232,7 +234,7 @@
       rows.forEach((r) => r.mainEl?.querySelector('.cl-inline')?.remove());
       paintAll();
       let done = 0;
-      for (const r of targets) {
+      for (const r of [...targets].reverse()) {
         // Closing the dialog, or a new render of the list, stops the run.
         if (!box.isConnected) { running = false; return; }
         const res = await write(r, part, false);
